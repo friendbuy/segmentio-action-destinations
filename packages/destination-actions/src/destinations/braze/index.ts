@@ -1,11 +1,22 @@
 import type { DestinationDefinition } from '@segment/actions-core'
 import type { Settings } from './generated-types'
-import { defaultValues } from '@segment/actions-core'
+import { DEFAULT_REQUEST_TIMEOUT, defaultValues } from '@segment/actions-core'
+import ecommerce from './ecommerce'
+import ecommerceSingleProduct from './ecommerceSingleProduct'
 import createAlias from './createAlias'
+import createAlias2 from './createAlias2'
 import identifyUser from './identifyUser'
+import identifyUser2 from './identifyUser2'
 import trackEvent from './trackEvent'
 import trackPurchase from './trackPurchase'
 import updateUserProfile from './updateUserProfile'
+import trackEvent2 from './trackEvent2'
+import trackPurchase2 from './trackPurchase2'
+import updateUserProfile2 from './updateUserProfile2'
+import triggerCampaign from './triggerCampaign'
+import triggerCanvas from './triggerCanvas'
+import { EVENT_NAMES } from './ecommerce/constants'
+import upsertCatalogItem from './upsertCatalogItem'
 
 const destination: DestinationDefinition<Settings> = {
   name: 'Braze Cloud Mode (Actions)',
@@ -25,8 +36,7 @@ const destination: DestinationDefinition<Settings> = {
         label: 'App ID',
         description:
           'The app identifier used to reference specific Apps in requests made to the Braze API. Created under Developer Console in the Braze Dashboard.',
-        type: 'string',
-        required: true
+        type: 'string'
       },
       endpoint: {
         label: 'REST Endpoint',
@@ -40,16 +50,23 @@ const destination: DestinationDefinition<Settings> = {
           { label: 'US-04	(https://dashboard-04.braze.com)', value: 'https://rest.iad-04.braze.com' },
           { label: 'US-05	(https://dashboard-05.braze.com)', value: 'https://rest.iad-05.braze.com' },
           { label: 'US-06	(https://dashboard-06.braze.com)', value: 'https://rest.iad-06.braze.com' },
+          { label: 'US-07	(https://dashboard-07.braze.com)', value: 'https://rest.iad-07.braze.com' },
           { label: 'US-08	(https://dashboard-08.braze.com)', value: 'https://rest.iad-08.braze.com' },
-          { label: 'EU-01	(https://dashboard-01.braze.eu)', value: 'https://rest.fra-01.braze.eu' }
+          { label: 'US-09	(https://dashboard-09.braze.com)', value: 'https://rest.us-09.braze.com' },
+          { label: 'US-10	(https://dashboard-10.braze.com)', value: 'https://rest.us-10.braze.com' },
+          { label: 'EU-01	(https://dashboard-01.braze.eu)', value: 'https://rest.fra-01.braze.eu' },
+          { label: 'EU-02	(https://dashboard-02.braze.eu)', value: 'https://rest.fra-02.braze.eu' },
+          { label: 'AU-01 (https://dashboard.au-01.braze.com)', value: 'https://rest.au-01.braze.com' },
+          { label: 'ID-01 (https://dashboard.id-01.braze.com)', value: 'https://rest.id-01.braze.com' },
+          { label: 'JP-01 (https://dashboard.jp-01.braze.com)', value: 'https://rest.jp-01.braze.com' }
         ],
         default: 'https://rest.iad-01.braze.com',
         required: true
       }
     }
   },
-  onDelete: async (request, { payload }) => {
-    return request('https://rest.iad-01.braze.com/users/delete', {
+  onDelete: async (request, { payload, settings }) => {
+    return request(`${settings.endpoint}/users/delete`, {
       method: 'post',
       json: {
         external_ids: [payload.userId]
@@ -60,7 +77,8 @@ const destination: DestinationDefinition<Settings> = {
     return {
       headers: {
         Authorization: `Bearer ${settings.api_key}`
-      }
+      },
+      timeout: Math.max(30_000, DEFAULT_REQUEST_TIMEOUT)
     }
   },
   actions: {
@@ -68,26 +86,210 @@ const destination: DestinationDefinition<Settings> = {
     trackEvent,
     trackPurchase,
     createAlias,
-    identifyUser
+    identifyUser,
+    identifyUser2,
+    trackEvent2,
+    trackPurchase2,
+    updateUserProfile2,
+    createAlias2,
+    upsertCatalogItem,
+    triggerCampaign,
+    triggerCanvas,
+    ecommerce,
+    ecommerceSingleProduct
   },
   presets: [
     {
       name: 'Track Calls',
-      subscribe: 'type = "track" and event != "Order Completed"',
+      subscribe: 'type = "track" and event != "Order Completed" and event != "Checkout Started" and event != "Order Refunded" and event != "Order Cancelled" and event != "Product Viewed" and event != "Product Added" and event != "Product Removed"',
       partnerAction: 'trackEvent',
-      mapping: defaultValues(trackEvent.fields)
+      mapping: defaultValues(trackEvent.fields),
+      type: 'automatic'
     },
     {
-      name: 'Order Completed Calls',
+      name: 'Order Placed (beta)',
       subscribe: 'event = "Order Completed"',
-      partnerAction: 'trackPurchase',
-      mapping: defaultValues(trackPurchase.fields)
+      partnerAction: 'ecommerce',
+      mapping: { 
+        ...defaultValues(ecommerce.fields),
+        name: EVENT_NAMES.ORDER_PLACED, 
+        metadata: {
+          order_status_url: { '@path': '$.properties.order_status_url' }
+        }
+      },
+      type: 'automatic'
+    },
+    {
+      name: 'Checkout Started (beta)',
+      subscribe: 'event = "Checkout Started"',
+      partnerAction: 'ecommerce',
+      mapping: { 
+        ...defaultValues(ecommerce.fields),
+        name: EVENT_NAMES.CHECKOUT_STARTED, 
+        metadata: {
+          checkout_url: { '@path': '$.properties.checkout_url' }
+        }
+      },
+      type: 'automatic'
+    },
+    {
+      name: 'Order Refunded (beta)',
+      subscribe: 'event = "Order Refunded"',
+      partnerAction: 'ecommerce',
+      mapping: { 
+        ...defaultValues(ecommerce.fields),
+        name: EVENT_NAMES.ORDER_REFUNDED, 
+        metadata: {
+          order_status_url: { '@path': '$.properties.order_status_url' }
+        }
+      },
+      type: 'automatic'
+    },
+    {
+      name: 'Order Cancelled (beta)',
+      subscribe: 'event = "Order Cancelled"',
+      partnerAction: 'ecommerce',
+      mapping: { 
+        ...defaultValues(ecommerce.fields),
+        name: EVENT_NAMES.ORDER_CANCELLED, 
+        metadata: {
+          order_status_url: { '@path': '$.properties.order_status_url' }
+        }
+      },
+      type: 'automatic'
+    },
+    {
+      name: 'Product Viewed (beta)',
+      subscribe: 'event = "Product Viewed"',
+      partnerAction: 'ecommerceSingleProduct',
+      mapping: {
+        ...defaultValues(ecommerceSingleProduct.fields),
+        name: EVENT_NAMES.PRODUCT_VIEWED
+      },
+      type: 'automatic'
+    },
+    {
+      name: 'Product Added (beta)',
+      subscribe: 'event = "Product Added"',
+      partnerAction: 'ecommerce',
+      mapping: {
+        ...defaultValues(ecommerce.fields),
+        name: EVENT_NAMES.CART_UPDATED,
+        action: 'add',
+        products: [
+          {
+            product_id: { '@path': '$.properties.product_id' },
+            product_name: { '@path': '$.properties.name' },
+            variant_id: { '@path': '$.properties.variant' },
+            image_url: { '@path': '$.properties.image_url' },
+            product_url: { '@path': '$.properties.url' },
+            quantity: { '@path': '$.properties.quantity' },
+            price: { '@path': '$.properties.price' }
+          }
+        ]
+      },
+      type: 'automatic'
+    },
+    {
+      name: 'Product Removed (beta)',
+      subscribe: 'event = "Product Removed"',
+      partnerAction: 'ecommerce',
+      mapping: {
+        ...defaultValues(ecommerce.fields),
+        name: EVENT_NAMES.CART_UPDATED,
+        action: 'remove',
+        products: [
+          {
+            product_id: { '@path': '$.properties.product_id' },
+            product_name: { '@path': '$.properties.name' },
+            variant_id: { '@path': '$.properties.variant' },
+            image_url: { '@path': '$.properties.image_url' },
+            product_url: { '@path': '$.properties.url' },
+            quantity: { '@path': '$.properties.quantity' },
+            price: { '@path': '$.properties.price' }
+          }
+        ]
+      },
+      type: 'automatic'
     },
     {
       name: 'Identify Calls',
       subscribe: 'type = "identify"',
       partnerAction: 'updateUserProfile',
-      mapping: defaultValues(updateUserProfile.fields)
+      mapping: defaultValues(updateUserProfile.fields),
+      type: 'automatic'
+    },
+    {
+      name: 'Associated Entity Added',
+      partnerAction: 'trackEvent',
+      mapping: {
+        ...defaultValues(trackEvent.fields),
+        properties: {
+          '@path': '$.properties'
+        }
+      },
+      type: 'specificEvent',
+      eventSlug: 'warehouse_entity_added_track'
+    },
+    {
+      name: 'Associated Entity Removed',
+      partnerAction: 'trackEvent',
+      mapping: {
+        ...defaultValues(trackEvent.fields),
+        properties: {
+          '@path': '$.properties'
+        }
+      },
+      type: 'specificEvent',
+      eventSlug: 'warehouse_entity_removed_track'
+    },
+    {
+      name: 'Entities Audience Entered',
+      partnerAction: 'trackEvent',
+      mapping: {
+        ...defaultValues(trackEvent.fields),
+        properties: {
+          '@path': '$.properties'
+        }
+      },
+      type: 'specificEvent',
+      eventSlug: 'warehouse_audience_entered_track'
+    },
+    {
+      name: 'Entities Exited',
+      partnerAction: 'trackEvent',
+      mapping: {
+        ...defaultValues(trackEvent.fields),
+        properties: {
+          '@path': '$.properties'
+        }
+      },
+      type: 'specificEvent',
+      eventSlug: 'warehouse_audience_exited_track'
+    },
+    {
+      name: 'Entities Audience Membership Changed',
+      partnerAction: 'updateUserProfile',
+      mapping: {
+        ...defaultValues(updateUserProfile.fields),
+        custom_attributes: {
+          '@path': '$.traits'
+        }
+      },
+      type: 'specificEvent',
+      eventSlug: 'warehouse_audience_membership_changed_identify'
+    },
+    {
+      name: 'Journeys Step Transition Track',
+      partnerAction: 'trackEvent',
+      mapping: {
+        ...defaultValues(trackEvent.fields),
+        properties: {
+          '@path': '$.properties'
+        }
+      },
+      type: 'specificEvent',
+      eventSlug: 'journeys_step_entered_track'
     }
   ]
 }

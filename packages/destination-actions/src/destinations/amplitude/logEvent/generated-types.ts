@@ -2,10 +2,6 @@
 
 export interface Payload {
   /**
-   * When enabled, track revenue with each product within the event. When disabled, track total revenue once for the event.
-   */
-  trackRevenuePerProduct?: boolean
-  /**
    * A readable ID specified by you. Must have a minimum length of 5 characters. Required unless device ID is present. **Note:** If you send a request with a user ID that is not in the Amplitude system yet, then the user tied to that ID will not be marked new until their first event.
    */
   user_id?: string | null
@@ -48,7 +44,7 @@ export interface Payload {
    */
   app_version?: string
   /**
-   * Platform of the device.
+   * Platform of the device. If using analytics.js to send events from a Browser and no if no Platform value is provided, the value "Web" will be sent.
    */
   platform?: string
   /**
@@ -152,9 +148,22 @@ export interface Payload {
    */
   insert_id?: string
   /**
-   * The name of the library that generated the event.
+   * HIDDEN: The name of the library that generated the event.
    */
   library?: string
+  /**
+   * Specifies the "library" value to send to Amplitude. Select "Use Mapping" to set the value from the "Library Mapping" field. "Legacy Behaviour" sets the value to "segment".
+   */
+  library2?: {
+    /**
+     * Configure how to set the library value.
+     */
+    behavior?: string
+    /**
+     * The library value to send to Amplitude. Only used when the "Behavior" field is set to "Use Mapping".
+     */
+    mapping?: string
+  }
   /**
    * The list of products purchased.
    */
@@ -179,6 +188,7 @@ export interface Payload {
      * The type of revenue for the item purchased. You must send a price and quantity or revenue with this field.
      */
     revenueType?: string
+    [k: string]: unknown
   }[]
   /**
    * If true, events are sent to Amplitude's `batch` endpoint rather than their `httpapi` events endpoint. Enabling this setting may help reduce 429s – or throttling errors – from Amplitude. More information about Amplitude's throttling is available in [their docs](https://developers.amplitude.com/docs/batch-event-upload-api#429s-in-depth).
@@ -192,6 +202,10 @@ export interface Payload {
    * Enabling this setting will set the Device manufacturer, Device Model and OS Name properties based on the user agent string provided in the userAgent field
    */
   userAgentParsing?: boolean
+  /**
+   * Enabling this setting will send user_agent based on the raw user agent string provided in the userAgent field
+   */
+  includeRawUserAgent?: boolean
   /**
    * UTM Tracking Properties
    */
@@ -210,4 +224,11 @@ export interface Payload {
    * Amplitude has a default minimum id lenght of 5 characters for user_id and device_id fields. This field allows the minimum to be overridden to allow shorter id lengths.
    */
   min_id_length?: number | null
+  /**
+   * The user agent data of device sending the event
+   */
+  userAgentData?: {
+    model?: string
+    platformVersion?: string
+  }
 }

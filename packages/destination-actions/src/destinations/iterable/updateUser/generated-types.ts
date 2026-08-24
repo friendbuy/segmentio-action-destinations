@@ -1,0 +1,42 @@
+// Generated file. DO NOT MODIFY IT BY HAND.
+
+export interface Payload {
+  /**
+   * An email address that identifies a user profile in Iterable.
+   */
+  email?: string
+  /**
+   * A user ID that identifies a user profile in Iterable.
+   */
+  userId?: string
+  /**
+   * The new email address to assign to the user. For single event processing, Segment makes a separate API call to set the new email address. Batch updating a profile email address is only supported for Hybrid projects.
+   */
+  newEmail?: string
+  /**
+   * Data to store on the user profile.
+   */
+  dataFields?: {
+    [k: string]: unknown
+  }
+  /**
+   * User phone number. Must be a valid phone number including country code. e.g. +14158675309
+   */
+  phoneNumber?: string | null
+  /**
+   * If you'd like to merge (rather than overwrite) a user profile's top-level objects with the values provided for them in the request body, set mergeNestedObjects to true.
+   */
+  mergeNestedObjects?: boolean
+  /**
+   * When enabled, Segment will send data to Iterable in batches of up to 1001
+   */
+  enable_batching?: boolean
+  /**
+   * When enabled, Segment will only update existing users in Iterable. New users will not be created. This is only applicable when batching is enabled. Talk to your Iterable representative to enable this feature on the Iterable side.
+   */
+  updateOnly?: boolean
+  /**
+   * Maximum number of events to include in each batch. Actual batch sizes may be lower.
+   */
+  batch_size?: number
+}

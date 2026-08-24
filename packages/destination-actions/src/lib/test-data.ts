@@ -3,7 +3,15 @@ import { ActionDefinition, DestinationDefinition, InputField } from '@segment/ac
 import Chance from 'chance'
 type Choices = Pick<InputField, 'choices'>
 
-function setTestData(seedName: string, type: string, fieldName?: string, format?: string, choices?: Choices) {
+function setTestData(
+  seedName: string,
+  type: string,
+  fieldName?: string,
+  format?: string,
+  choices?: Choices,
+  minimum?: number,
+  maximum?: number
+) {
   const chance = new Chance(seedName)
 
   if (Array.isArray(choices)) {
@@ -23,10 +31,25 @@ function setTestData(seedName: string, type: string, fieldName?: string, format?
       val = '2021-02-01T00:00:00.000Z'
       break
     case 'integer':
-      val = chance.integer()
+      if (minimum !== undefined || maximum !== undefined) {
+        val = chance.integer({
+          ...(minimum !== undefined && { min: minimum }),
+          ...(maximum !== undefined && { max: maximum })
+        })
+      } else {
+        val = chance.integer()
+      }
       break
     case 'number':
-      val = chance.floating({ fixed: 2 })
+      if (minimum !== undefined || maximum !== undefined) {
+        val = chance.floating({
+          ...(minimum !== undefined && { min: minimum }),
+          ...(maximum !== undefined && { max: maximum }),
+          fixed: 2
+        })
+      } else {
+        val = chance.floating({ fixed: 2 })
+      }
       break
     case 'text':
       val = chance.sentence()
@@ -77,15 +100,16 @@ function setTestData(seedName: string, type: string, fieldName?: string, format?
 
   if (fieldName === 'email') val = chance.email()
   if (fieldName === 'currency') val = chance.currency().code
+  if (fieldName === 'phone_number') val = '+' + chance.phone({ formatted: false })
 
   return val
 }
 
 function setData(eventData: any, chanceName: string, fieldName: string, field: any, data?: any) {
-  const { format, multiple, type } = field
+  const { format, multiple, type, minimum, maximum } = field
 
   if (!data) {
-    data = setTestData(chanceName, type, fieldName, format, field.choices)
+    data = setTestData(chanceName, type, fieldName, format, field.choices, minimum, maximum)
   }
 
   eventData[fieldName] = multiple ? [data] : data
@@ -104,13 +128,13 @@ export function generateTestData(
   const authentication = destination.authentication
   if (authentication) {
     for (const settingKey in authentication.fields) {
-      const { format, type } = authentication.fields[settingKey]
-      settingsData[settingKey] = setTestData(seedName, type, undefined, format)
+      const { format, type, minimum, maximum } = authentication.fields[settingKey]
+      settingsData[settingKey] = setTestData(seedName, type, undefined, format, undefined, minimum, maximum)
     }
   }
 
   for (const [name, field] of Object.entries(action.fields)) {
-    if (isRequiredOnly && !(field.required || name.includes('id'))) {
+    if (isRequiredOnly && !(field.required || name.includes('id') || name.includes('consent'))) {
       continue
     }
 
@@ -133,6 +157,16 @@ export function generateTestData(
       continue
     }
 
+    if (name == 'consent') {
+      const consent = {
+        categoryPreferences: {
+          analytics: true,
+          marketing: false
+        }
+      }
+      eventData = setData(eventData, seedName, name, field, consent)
+      continue
+    }
     eventData = setData(eventData, seedName, name, field)
   }
 

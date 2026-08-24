@@ -1,10 +1,35 @@
-import { InputField } from '@segment/actions-core/src/destination-kit/types'
+import { InputField } from '@segment/actions-core/destination-kit/types'
+import { DataStreamType } from './ga4-types'
+
+export const formatUserProperties = (userProperties: object | undefined): object | undefined => {
+  if (!userProperties) {
+    return undefined
+  }
+
+  let properties = {}
+
+  Object.entries(userProperties).forEach(([key, value]) => {
+    properties = { ...properties, ...{ [key]: { value: value } } }
+  })
+
+  return { user_properties: properties }
+}
+
+export const user_properties: InputField = {
+  label: 'User Properties',
+  description:
+    'The user properties to send to Google Analytics 4. You must create user-scoped dimensions to ensure custom properties are picked up by Google. See Google’s [Custom user properties](https://support.google.com/analytics/answer/9269570) to learn how to set and register user properties. ',
+  type: 'object',
+  additionalProperties: true,
+  defaultObjectUI: 'keyvalue'
+}
 
 export const params: InputField = {
   label: 'Event Parameters',
-  description: 'The event parameters to send to Google',
+  description: 'The event parameters to send to Google Analytics 4.',
   type: 'object',
-  additionalProperties: true
+  additionalProperties: true,
+  defaultObjectUI: 'keyvalue'
 }
 export const user_id: InputField = {
   label: 'User ID',
@@ -75,9 +100,9 @@ export const affiliation: InputField = {
 
 export const client_id: InputField = {
   label: 'Client ID',
-  description: 'Uniquely identifies a user instance of a web client.',
+  description: 'Uniquely identifies a user instance of a web client. **Required for web streams.**',
   type: 'string',
-  required: true,
+  required: false,
   default: {
     '@if': {
       exists: { '@path': '$.userId' },
@@ -85,6 +110,14 @@ export const client_id: InputField = {
       else: { '@path': '$.anonymousId' }
     }
   }
+}
+
+export const app_instance_id: InputField = {
+  label: 'Firebase App Instance ID',
+  description:
+    'Uniquely identifies a specific installation of a Firebase app. This value needs to be retrieved through the Firebase SDK. **Required for mobile app streams.**',
+  type: 'string',
+  required: false
 }
 
 export const currency: InputField = {
@@ -123,6 +156,7 @@ export const minimal_items: InputField = {
   description: 'The list of products purchased.',
   type: 'object',
   multiple: true,
+  additionalProperties: true,
   properties: {
     item_id: {
       label: 'Product ID',
@@ -298,4 +332,51 @@ export const items_multi_products: InputField = {
       }
     ]
   }
+}
+
+export const engagement_time_msec: InputField = {
+  label: 'Engagement Time in Milliseconds',
+  type: 'number',
+  description:
+    'The amount of time a user interacted with your site, in milliseconds. Google only counts users who interact with your site for a non-zero amount of time. By default, Segment sets engagement time to 1 so users are counted.',
+  default: 1
+}
+
+export const timestamp_micros: InputField = {
+  label: 'Event Timestamp',
+  type: 'string',
+  description:
+    "A Unix timestamp (in microseconds) for the time to associate with the event. Segment will convert to Unix if not already converted. Events can be backdated up to 3 calendar days based on the property's timezone.",
+  default: {
+    '@path': '$.timestamp'
+  }
+}
+
+export const data_stream_type: InputField = {
+  label: 'Data Stream Type',
+  type: 'string',
+  choices: [DataStreamType.Web, DataStreamType.MobileApp],
+  description:
+    'The type of data stream this data belongs in. This can either be a web stream or a mobile app stream (iOS or Android). Possible values: "Web" (default) and "Mobile App".',
+  default: DataStreamType.Web
+}
+
+export const ad_user_data_consent: InputField = {
+  label: 'Ad User Data Consent State',
+  description:
+    'Sets consent for sending user data to Google for advertising purposes. Must be either GRANTED or DENIED.',
+  type: 'string',
+  choices: [
+    { label: 'Granted', value: 'GRANTED' },
+    { label: 'Denied', value: 'DENIED' }
+  ]
+}
+export const ad_personalization_consent: InputField = {
+  label: 'Ad Personalization Consent State',
+  description: 'Sets consent for personalized advertising. Must be either GRANTED or DENIED.',
+  type: 'string',
+  choices: [
+    { label: 'Granted', value: 'GRANTED' },
+    { label: 'Denied', value: 'DENIED' }
+  ]
 }

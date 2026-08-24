@@ -32,30 +32,41 @@ const action: ActionDefinition<Settings, Payload> = {
       label: 'Person Name',
       description: 'Name of the person',
       type: 'string',
-      required: false
+      required: false,
+      default: {
+        '@path': '$.traits.name'
+      }
     },
     email: {
       label: 'Email Address',
       description: 'Email addresses for this person.',
       type: 'string',
       required: false,
-      multiple: true
+      multiple: true,
+      default: {
+        '@path': '$.traits.email'
+      }
     },
     phone: {
       label: 'Phone Number',
       description: 'Phone numbers for the person.',
       type: 'string',
       required: false,
-      multiple: true
+      multiple: true,
+      default: {
+        '@path': '$.traits.phone'
+      }
     },
     visible_to: {
       label: 'Visible To',
       description:
-        'Visibility of the Person. If omitted, visibility will be set to the default visibility setting of this item type for the authorized user.',
-      type: 'integer',
+        "Visibility of the Person. If omitted, visibility will be set to the default visibility setting of this item type for the authorized user. 'Owner's visibility group and sub-groups' and 'Entire company' options only available with Professional or Enterprise plans",
+      type: 'string',
       choices: [
-        { label: 'Owner & followers (private)', value: 1 },
-        { label: 'Entire company (shared)', value: 3 }
+        { label: 'Owner & followers (private)', value: '1' },
+        { label: 'Entire company (shared)', value: '3' },
+        { label: "Owner's visibility group and sub-groups", value: '5' },
+        { label: 'Entire company', value: '7' }
       ],
       required: false
     },
@@ -91,6 +102,11 @@ const action: ActionDefinition<Settings, Payload> = {
       add_time: payload.add_time ? `${payload.add_time}` : undefined,
       visible_to: payload.visible_to
     }
+
+    if (!personId)
+      if (payload.match_field)
+        // if doing a create, include the match_field and match_value data so that it gets written to the new object
+        Object.assign(person, { [payload.match_field]: payload.match_value })
 
     addCustomFieldsFromPayloadToEntity(payload, person)
 

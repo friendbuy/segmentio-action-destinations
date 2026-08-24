@@ -1,7 +1,22 @@
-import AbortController from 'abort-controller'
 import { CustomError } from 'ts-custom-error'
 import fetch, { Headers, Request, Response } from './fetch'
 import { isObject } from './real-type-of'
+import type https from 'https'
+import { StatsContext } from './destination-kit'
+
+const defaultRequestTimeout = 10_000
+// making this configurable will allow some environments to support a longer/shorter timeout
+if (
+  globalThis.process != null &&
+  typeof globalThis.process.env === 'object' &&
+  globalThis.process.env.DEFAULT_REQUEST_TIMEOUT
+) {
+  const parsedDefaultTimeout = parseInt(globalThis.process.env.DEFAULT_REQUEST_TIMEOUT, 10)
+  if (!Number.isNaN(parsedDefaultTimeout) && parsedDefaultTimeout > 0) {
+    defaultRequestTimeout
+  }
+}
+export const DEFAULT_REQUEST_TIMEOUT = defaultRequestTimeout
 
 /**
  * The supported request options you can use with the request client
@@ -46,6 +61,14 @@ export interface RequestOptions extends Omit<RequestInit, 'headers'> {
    * When provided, will automatically apply basic authentication
    */
   username?: string
+  /**
+   * If enabled, will not clone the response as part of post-request processing
+   */
+  skipResponseCloning?: boolean
+  /**
+   * Uses the provided https.Agent
+   */
+  agent?: https.Agent
 }
 
 /**
@@ -62,6 +85,8 @@ export interface AllRequestOptions extends RequestOptions {
    * Useful for logging, cleanup, or modifying the response object
    */
   afterResponse?: AfterResponseHook[]
+
+  statsContext?: StatsContext
 }
 
 export interface NormalizedOptions extends Omit<AllRequestOptions, 'headers'> {
@@ -175,15 +200,42 @@ export class HTTPError extends CustomError {
   }
 }
 
-/** Error thrown when a request is aborted because of a client timeout. */
+/**
+ * Error thrown when a request is aborted because of a client timeout.
+ * We add a code so that the error is not treated as an "internal" error
+ */
 export class TimeoutError extends CustomError {
   request: Request
   options: NormalizedOptions
+  code: string
 
   constructor(request: Request, options: NormalizedOptions) {
-    super(`Request timed out`)
+    super(`Request timed out after ${options.timeout}ms`)
     this.request = request
     this.options = options
+    this.code = 'ETIMEDOUT'
+  }
+}
+
+export class RequestClientError extends CustomError {
+  code: string
+  status: number
+
+  constructor(message = 'Request was aborted') {
+    super(message)
+    this.code = 'REQUESTCLIENTERROR'
+    this.status = 408
+  }
+}
+
+export class RequestTimeoutError extends CustomError {
+  code: string
+  status: number
+
+  constructor(message = 'Request timed out before receiving a response') {
+    super(message)
+    this.code = 'REQUESTTIMEOUTERROR'
+    this.status = 408
   }
 }
 
@@ -224,22 +276,26 @@ class RequestClient {
     this.options = {
       ...options,
       method: getRequestMethod(options.method ?? 'get'),
-      throwHttpErrors: options.throwHttpErrors !== false,
-      timeout: options.timeout ?? 10000
+      throwHttpErrors: options.throwHttpErrors !== false
     } as NormalizedOptions
 
     // Timeout support. Use our own abort controller so consumers can pass in their own `signal`
     // if they wish to use timeouts alongside other logic to abort a request
     this.abortController = new AbortController()
-    if (this.options.signal) {
-      // Listen to consumer abort events to also abort our internal controller
-      this.options.signal.addEventListener('abort', () => {
-        this.abortController.abort()
-      })
-    }
 
     // Use our internal abort controller for fetch
-    this.options.signal = this.abortController.signal
+    const signals: AbortSignal[] = [this.abortController.signal]
+    if (this.options?.signal) {
+      // If the user provided a signal, we want to use it alongside our own
+      signals.push(this.options.signal)
+      this.options.timeout = options?.timeout ?? false
+    } else {
+      // Apply the default timeout unless explicitly set to false
+      this.options.timeout = options?.timeout ?? DEFAULT_REQUEST_TIMEOUT
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+    this.options.signal = AbortSignal.any(signals)
 
     // Construct a request object to send to the Fetch API
     this.request = new Request(url, this.options)
@@ -264,8 +320,18 @@ class RequestClient {
   }
 
   async executeRequest<T extends Response>(): Promise<T> {
-    let response = await this.fetch()
-
+    let response
+    try {
+      response = await this.fetch()
+    } catch (err) {
+      if ((err as Error)?.name === 'AbortError') {
+        if (this.request.signal?.reason?.name === 'TimeoutError') {
+          throw new RequestTimeoutError()
+        }
+        throw new RequestClientError()
+      }
+      throw err
+    }
     for (const hook of this.options.afterResponse ?? []) {
       const modifiedResponse = await hook(this.request, this.options, response)
       if (modifiedResponse instanceof Response) {

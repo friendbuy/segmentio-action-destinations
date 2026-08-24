@@ -12,14 +12,14 @@ const destination: DestinationDefinition<Settings> = {
     scheme: 'custom',
     fields: {
       apiToken: {
-        type: 'string',
+        type: 'password',
         label: 'API Token',
         description: 'Your Metronome API Token',
         required: true
       }
     },
     testAuthentication: async (request) => {
-      const response = await request('https://api.getmetronome.com/v1/ingest', {
+      const response = await request('https://api.metronome.com/v1/ingest', {
         method: 'post',
         json: [],
         throwHttpErrors: false
@@ -44,7 +44,8 @@ const destination: DestinationDefinition<Settings> = {
       name: 'Send track events to Metronome',
       subscribe: 'type = "track"',
       partnerAction: 'sendEvent',
-      mapping: defaultValues(sendEvent.fields)
+      mapping: defaultValues(sendEvent.fields),
+      type: 'automatic'
     }
   ]
 }

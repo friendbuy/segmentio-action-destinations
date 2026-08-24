@@ -1,7 +1,30 @@
 import type { ActionDefinition } from '@segment/actions-core'
 import type { Settings } from '../generated-types'
 import type { Payload } from './generated-types'
-import { params, client_id, user_id } from '../ga4-properties'
+import {
+  verifyParams,
+  verifyUserProps,
+  convertTimestamp,
+  getMobileStreamParams,
+  getWebStreamParams,
+  sendData,
+  formatConsent
+} from '../ga4-functions'
+
+import {
+  formatUserProperties,
+  user_properties,
+  params,
+  client_id,
+  user_id,
+  engagement_time_msec,
+  timestamp_micros,
+  data_stream_type,
+  app_instance_id,
+  ad_user_data_consent,
+  ad_personalization_consent
+} from '../ga4-properties'
+import { DataStreamParams, DataStreamType } from '../ga4-types'
 
 const normalizeEventName = (name: string, lowercase: boolean | undefined): string => {
   name = name.trim()
@@ -18,8 +41,11 @@ const action: ActionDefinition<Settings, Payload> = {
   description: 'Send any custom event',
   defaultSubscription: 'type = "track"',
   fields: {
+    data_stream_type: { ...data_stream_type },
+    app_instance_id: { ...app_instance_id },
     clientId: { ...client_id },
     user_id: { ...user_id },
+    timestamp_micros: { ...timestamp_micros },
     name: {
       label: 'Event Name',
       description:
@@ -37,23 +63,45 @@ const action: ActionDefinition<Settings, Payload> = {
       type: 'boolean',
       default: false
     },
-    params: { ...params }
+    user_properties: user_properties,
+    engagement_time_msec: engagement_time_msec,
+    params: { ...params },
+    ad_user_data_consent: ad_user_data_consent,
+    ad_personalization_consent: ad_personalization_consent
   },
-  perform: (request, { payload }) => {
+  perform: (request, { payload, settings }) => {
+    const data_stream_type = payload.data_stream_type ?? DataStreamType.Web
+    const stream_params: DataStreamParams =
+      data_stream_type === DataStreamType.MobileApp
+        ? getMobileStreamParams(settings.apiSecret, settings.firebaseAppId, payload.app_instance_id)
+        : getWebStreamParams(settings.apiSecret, settings.measurementId, payload.clientId)
+
     const event_name = normalizeEventName(payload.name, payload.lowercase)
-    return request('https://www.google-analytics.com/mp/collect', {
-      method: 'POST',
-      json: {
-        client_id: payload.clientId,
-        user_id: payload.user_id,
-        events: [
-          {
-            name: event_name,
-            params: payload.params
+
+    verifyParams(payload.params)
+    verifyUserProps(payload.user_properties)
+
+    const request_object: { [key: string]: unknown } = {
+      ...stream_params.identifier,
+      user_id: payload.user_id,
+      events: [
+        {
+          name: event_name,
+          params: {
+            engagement_time_msec: payload.engagement_time_msec,
+            ...payload.params
           }
-        ]
-      }
-    })
+        }
+      ],
+      ...formatUserProperties(payload.user_properties),
+      timestamp_micros: convertTimestamp(payload.timestamp_micros),
+      ...formatConsent({
+        ad_personalization_consent: payload.ad_personalization_consent,
+        ad_user_data_consent: payload.ad_user_data_consent
+      })
+    }
+
+    return sendData(request, stream_params.search_params, request_object)
   }
 }
 export default action

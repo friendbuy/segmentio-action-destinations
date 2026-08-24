@@ -2,30 +2,26 @@ import type { ActionDefinition } from '@segment/actions-core'
 import type { Settings } from '../generated-types'
 import type { Payload } from './generated-types'
 import CordialClient from '../cordial-client'
-import { getUserIdentifier } from '../user-identifier'
-import { commonFields } from '../common-fields'
+import userIdentityFields from '../identities-fields'
 
 const action: ActionDefinition<Settings, Payload> = {
   title: 'Upsert Contact',
-  description: "Upsert Cordial Contact from Segment's identify events",
+  description: 'Create or update a contact in Cordial.',
   defaultSubscription: 'type = "identify"',
   fields: {
-    ...commonFields,
+    ...userIdentityFields,
     attributes: {
       label: 'Contact Attributes',
-      description: 'Contact Attributes',
+      description:
+        'Contact attributes to update. Optional. Contact attributes must exist in Cordial prior to updating. Attributes that do not exist in Cordial will be ignored. Complex attribute types to be mapped via dot notation, for example, `cordialPerson.first_name -> traits.segmentPerson.firstName`, `cordialPerson.last_name -> traits.segmentPerson.lastName`. Segment trait address can be mapped directly to geo Cordial attribute: `geo_cordial_attribute -> traits.address`.',
       type: 'object',
       required: false,
-      default: {
-        '@path': '$.traits'
-      }
+      defaultObjectUI: 'keyvalue:only'
     }
   },
   perform: async (request, { settings, payload }) => {
     const client = new CordialClient(settings, request)
-    const attributes = payload.attributes ? await client.transformAttributes(payload.attributes) : undefined
-    const userIdentifier = getUserIdentifier(payload.identifyByKey, payload.identifyByValue)
-    return client.upsertContact(userIdentifier, attributes)
+    return client.upsertContact(payload)
   }
 }
 

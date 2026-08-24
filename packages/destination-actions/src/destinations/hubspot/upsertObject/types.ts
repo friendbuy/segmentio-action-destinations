@@ -1,0 +1,290 @@
+import { StatsContext } from '@segment/actions-core/*'
+import { Payload } from './generated-types'
+import { SubscriptionMetadata } from '@segment/actions-core/destination-kit'
+
+export const SyncMode = {
+  Upsert: 'upsert',
+  Add: 'add',
+  Update: 'update'
+} as const
+
+export type SyncMode = typeof SyncMode[keyof typeof SyncMode]
+
+export const AssociationSyncMode = {
+  Upsert: 'upsert',
+  Read: 'read'
+} as const
+
+export type AssociationSyncMode = typeof AssociationSyncMode[keyof typeof AssociationSyncMode]
+
+export const ObjReqType = {
+  Upsert: 'upsert',
+  Create: 'create',
+  Update: 'update',
+  Read: 'read'
+} as const
+
+export type ObjReqType = typeof ObjReqType[keyof typeof ObjReqType]
+
+export const HSPropTypeFieldType = {
+  StringText: 'string:text',
+  NumberNumber: 'number:number',
+  DateTimeDate: 'datetime:date',
+  DateDate: 'date:date',
+  EnumerationBooleanCheckbox: 'enumeration:booleancheckbox',
+  StringTextArea: 'string:textarea'
+} as const
+
+export type HSPropTypeFieldType = typeof HSPropTypeFieldType[keyof typeof HSPropTypeFieldType]
+
+export const HSPropType = {
+  Date: 'date',
+  String: 'string',
+  DateTime: 'datetime',
+  Number: 'number',
+  Enumeration: 'enumeration'
+} as const
+
+export type HSPropType = typeof HSPropType[keyof typeof HSPropType]
+
+export const HSPropFieldType = {
+  Text: 'text',
+  Number: 'number',
+  Date: 'date',
+  BooleanCheckbox: 'booleancheckbox',
+  Select: 'select',
+  TextArea: 'textarea'
+} as const
+
+export type HSPropFieldType = typeof HSPropFieldType[keyof typeof HSPropFieldType]
+
+export const SchemaMatch = {
+  FullMatch: 'full_match',
+  PropertiesMissing: 'properties_missing',
+  NoMatch: 'no_match',
+  Mismatch: 'mismatch'
+} as const
+
+export type SchemaMatch = typeof SchemaMatch[keyof typeof SchemaMatch]
+
+export const ReadType = {
+  ReturnRecordsWithIds: 'return_records_with_ids',
+  ReturnRecordsWithoutIds: 'return_records_without_ids'
+} as const
+
+export type ReadType = typeof ReadType[keyof typeof ReadType]
+
+export interface Prop {
+  name: string
+  type: HSPropType
+  fieldType: HSPropFieldType
+  typeFieldType: HSPropTypeFieldType
+}
+
+export interface CachableSchema {
+  object_details: {
+    object_type: string
+    id_field_name: string
+  }
+  properties: Prop[]
+  sensitiveProperties: Prop[]
+}
+
+export interface SchemaDiff {
+  match: SchemaMatch
+  missingProperties?: Prop[]
+  missingSensitiveProperties?: Prop[]
+}
+
+export interface ReadPropsResp {
+  results: Array<Result>
+  status: string
+  statusText: string
+  message?: string
+}
+
+export interface Result {
+  name: string
+  type: HSPropType
+  fieldType: HSPropFieldType
+  hasUniqueValue: boolean
+}
+
+export interface ReadReq {
+  idProperty: string
+  properties: string[]
+  inputs: Array<{ id: string }>
+}
+
+export interface UpsertReq {
+  inputs: Array<{
+    idProperty: string
+    id: string
+    properties: Record<string, string>
+  }>
+}
+
+export interface UpdateReq {
+  inputs: Array<{
+    // Omitted when the identifier is hs_object_id, which batch/update resolves as the record id.
+    // batch/upsert has the opposite contract - see UpsertReq - so the two must not share a type.
+    idProperty?: string
+    id: string
+    properties: Record<string, string>
+  }>
+}
+
+export interface CreateReq {
+  inputs: Array<{
+    idProperty: string
+    properties: Record<string, string>
+  }>
+}
+
+export interface BatchObjResp {
+  status: string
+  results: Array<{
+    id: string
+    properties: Record<string, string | null>
+  }>
+}
+
+export interface PayloadWithFromId extends Payload {
+  object_details: Payload['object_details'] & {
+    record_id: string
+  }
+  associations?: Array<NonNullable<Payload['associations']>[number] & { from_record_id: string }>
+  dissociations?: Array<NonNullable<Payload['dissociations']>[number] & { from_record_id: string }>
+}
+
+export interface AssociationPayload {
+  object_details: {
+    object_type: string
+    id_field_name: string
+    id_field_value: string
+    property_group?: string
+    from_record_id: string
+  }
+  association_details: {
+    association_label: string
+  }
+}
+
+export interface AssociationPayloadWithId extends AssociationPayload {
+  object_details: AssociationPayload['object_details'] & {
+    record_id: string
+  }
+}
+
+export interface AssociationsReq {
+  inputs: {
+    types: AssociationType[]
+    from: {
+      id: string
+    }
+    to: {
+      id: string
+    }
+  }[]
+}
+
+export interface AssociationType {
+  associationCategory: AssociationCategory
+  associationTypeId: string
+}
+
+enum AssociationCategory {
+  HUBSPOT_DEFINED = 'HUBSPOT_DEFINED',
+  USER_DEFINED = 'USER_DEFINED',
+  INTEGRATOR_DEFINED = 'INTEGRATOR_DEFINED'
+}
+
+export interface GroupableFields {
+  object_type: string
+  id_field_name: string
+}
+
+export interface CreatePropsReq {
+  inputs: Array<CreatePropsReqItem>
+}
+
+export interface CreatePropsReqItem {
+  name: string
+  label: string
+  groupName: string
+  type: string
+  dataSensitivity: 'sensitive' | undefined
+  fieldType: string
+  options?: Array<{ label: string; value: string; hidden: boolean; description: string; displayOrder: number }>
+}
+
+export interface RequestData<Settings, Payload> {
+  rawData: Payload
+  payload: Payload
+  syncMode: SyncMode
+  subscriptionMetadata: SubscriptionMetadata
+  statsContext?: StatsContext
+  settings: Settings
+}
+
+export interface Association {
+  object_type?: string
+  association_label?: string
+  id_field_name?: string
+  id_field_value?: string
+  from_record_id?: string
+}
+
+export type AssociationsKey = 'associations' | 'dissociations'
+
+export type AssociationsAction = 'create' | 'archive'
+
+export interface ReadListResp {
+  list: ReadListRespItem
+}
+
+export interface ReadListRespItem {
+  listId: string
+  processingType: string
+  objectTypeId: string
+  name: string
+  processingTypes: string
+}
+
+export interface CreateListReq {
+  name: string
+  objectTypeId: string
+  processingType: 'MANUAL'
+}
+
+export interface CreateListResp {
+  list: {
+    listId: string
+    objectTypeId: string
+    name: string
+  }
+}
+
+export interface CachableList {
+  listId: string
+  objectType: string
+  objectTypeId: string
+  name: string
+}
+
+export interface AddRemoveFromListReq {
+  recordIdsToAdd?: string[]
+  recordIdsToRemove?: string[]
+}
+
+export type EngageAudiencePayload = Payload & {
+  traits_or_props: {
+    [k: string]: unknown
+  }
+  computation_key: string
+}
+
+export type PayloadListType =
+  | 'is_engage_audience_payload'
+  | 'is_non_engage_audience_payload'
+  | 'is_not_audience_payload'

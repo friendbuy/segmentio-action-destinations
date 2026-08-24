@@ -1,0 +1,132 @@
+import type { Settings } from '../generated-types'
+import type { Payload } from './generated-types'
+import { commonFields } from './common-fields'
+import { Client } from './client'
+import { ActionDefinition, RequestClient, IntegrationError, StatsContext, Logger } from '@segment/actions-core'
+import { dynamicFields } from './functions/dynamic-field-functions'
+import { SyncMode, SchemaMatch, CachableSchema, SchemaDiff } from './types'
+import { SubscriptionMetadata } from '@segment/actions-core/destination-kit'
+import {
+  getSchemaFromHubspot,
+  createHubspotEventSchema,
+  updateHubspotSchema
+} from './functions/hubspot-event-schema-functions'
+import { sendEvent } from './functions/event-completion-functions'
+import { validate } from './functions/validation-functions'
+import { eventSchema } from './functions/schema-functions'
+import {
+  compareSchemas,
+  saveSchemaToCache,
+  getSchemaFromCache,
+  convertNumericStrings,
+  convertStringToNumbers
+} from './functions/cache-functions'
+
+const action: ActionDefinition<Settings, Payload> = {
+  title: 'Custom Event V2',
+  description: 'Send Custom Events to HubSpot',
+  syncMode: {
+    description: 'Specify how Segment should update event schemas in Hubspot',
+    label: 'Sync Mode',
+    default: 'update',
+    choices: [
+      { label: 'Create new and update existing custom event definitions', value: 'upsert' },
+      { label: 'Create new, but do not update existing custom event definitions', value: 'add' },
+      { label: 'Update existing, but do not create new custom event definitions', value: 'update' }
+    ]
+  },
+  fields: {
+    ...commonFields
+  },
+  dynamicFields,
+  perform: async (request, { payload, syncMode, subscriptionMetadata, statsContext, logger }) => {
+    return await send(request, payload, syncMode as SyncMode, subscriptionMetadata, statsContext, logger)
+  }
+}
+
+const send = async (
+  request: RequestClient,
+  payload: Payload,
+  syncMode: SyncMode,
+  subscriptionMetadata?: SubscriptionMetadata,
+  statsContext?: StatsContext,
+  logger?: Logger
+) => {
+  statsContext?.tags?.push('action:custom_event')
+
+  const client = new Client(request)
+  const validPayload = validate(payload, statsContext, logger, subscriptionMetadata)
+  const schema = eventSchema(validPayload)
+  const cachedSchema = getSchemaFromCache(schema.name, subscriptionMetadata, statsContext)
+
+  statsContext?.statsClient?.incr(`cache.get.${cachedSchema === undefined ? 'miss' : 'hit'}`, 1, statsContext?.tags)
+
+  const cacheSchemaDiff: SchemaDiff = compareSchemas(schema, cachedSchema)
+
+  statsContext?.statsClient?.incr(`cache.diff.${cacheSchemaDiff.match}`, 1, statsContext?.tags)
+
+  if (cacheSchemaDiff.match === SchemaMatch.FullMatch) {
+    convertNumericStrings(validPayload, cacheSchemaDiff.numericStrings)
+    convertStringToNumbers(validPayload, cacheSchemaDiff.stringToNumbers)
+    return await sendEvent(client, (cachedSchema as CachableSchema).fullyQualifiedName, validPayload)
+  }
+
+  const hubspotSchema = await getSchemaFromHubspot(client, schema)
+
+  statsContext?.statsClient?.incr(
+    `hubspotSchema.get.${hubspotSchema === undefined ? 'miss' : 'hit'}`,
+    1,
+    statsContext?.tags
+  )
+
+  const hubspotSchemaDiff: SchemaDiff = compareSchemas(schema, hubspotSchema)
+
+  statsContext?.statsClient?.incr(`hubspotSchemaDiff.diff.${hubspotSchemaDiff.match}`, 1, statsContext?.tags)
+
+  convertNumericStrings(validPayload, hubspotSchemaDiff.numericStrings)
+  convertStringToNumbers(validPayload, hubspotSchemaDiff.stringToNumbers)
+
+  switch (hubspotSchemaDiff.match) {
+    case SchemaMatch.FullMatch: {
+      await saveSchemaToCache(hubspotSchema as CachableSchema, subscriptionMetadata, statsContext)
+      return await sendEvent(client, (hubspotSchema as CachableSchema).fullyQualifiedName, validPayload)
+    }
+
+    case SchemaMatch.PropertiesMissing: {
+      if (syncMode === 'add') {
+        throw new IntegrationError(
+          `The 'Sync Mode' setting is set to 'add' which is stopping Segment from creating a new properties on the Event Schema in the HubSpot`,
+          'HUBSPOT_SCHEMA_PROPERTIES_MISSING',
+          400
+        )
+      }
+      const cacheableSchema = {
+        ...schema,
+        fullyQualifiedName: (hubspotSchema as CachableSchema).fullyQualifiedName,
+        properties: {
+          ...(hubspotSchema as CachableSchema).properties, // Existing properties from HubSpot with their types instead of inferred types
+          ...hubspotSchemaDiff.missingProperties // Add new properties with inferred types
+        }
+      }
+      await updateHubspotSchema(client, cacheableSchema.fullyQualifiedName, hubspotSchemaDiff)
+      await saveSchemaToCache(cacheableSchema, subscriptionMetadata, statsContext)
+      return await sendEvent(client, cacheableSchema.fullyQualifiedName, validPayload)
+    }
+
+    case SchemaMatch.NoMatch: {
+      if (syncMode === 'update') {
+        throw new IntegrationError(
+          `The 'Sync Mode' setting is set to 'update' which is stopping Segment from creating a new Custom Event Schema in the HubSpot`,
+          'HUBSPOT_SCHEMA_MISSING',
+          400
+        )
+      }
+      const fullyQualifiedName = await createHubspotEventSchema(client, schema)
+      const cacheableSchema = { ...schema, fullyQualifiedName }
+      await saveSchemaToCache(cacheableSchema, subscriptionMetadata, statsContext)
+      return await sendEvent(client, cacheableSchema.fullyQualifiedName, validPayload)
+    }
+  }
+}
+
+export default action

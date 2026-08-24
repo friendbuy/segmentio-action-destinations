@@ -1,9 +1,9 @@
 import nock from 'nock'
 import { createTestEvent, createTestIntegration } from '@segment/actions-core'
 import Destination from '../../index'
+import { ApiRegions } from '../../common/utils'
 
 const testDestination = createTestIntegration(Destination)
-const MIXPANEL_API_SECRET = 'test-api-key'
 const MIXPANEL_PROJECT_TOKEN = 'test-proj-token'
 const timestamp = '2021-08-17T15:21:15.449Z'
 
@@ -12,7 +12,7 @@ describe('Mixpanel.groupIdentifyUser', () => {
     const event = createTestEvent({
       timestamp,
       groupId: 'test-group-id',
-      traits: { hello: 'world', company: 'Mixpanel' }
+      traits: { hello: 'world', company: 'Mixpanel', name: 'test', created_at: timestamp }
     })
 
     nock('https://api.mixpanel.com').post('/groups').reply(200, {})
@@ -23,7 +23,7 @@ describe('Mixpanel.groupIdentifyUser', () => {
       useDefaultMappings: true,
       settings: {
         projectToken: MIXPANEL_PROJECT_TOKEN,
-        apiSecret: MIXPANEL_API_SECRET
+        apiRegion: ApiRegions.US
       }
     })
     expect(responses.length).toBe(1)
@@ -37,7 +37,9 @@ describe('Mixpanel.groupIdentifyUser', () => {
           $group_id: 'Mixpanel',
           $set: {
             hello: 'world',
-            company: 'Mixpanel'
+            company: 'Mixpanel',
+            $name: 'test',
+            $created: timestamp
           }
         })
       })
@@ -58,7 +60,179 @@ describe('Mixpanel.groupIdentifyUser', () => {
       useDefaultMappings: true,
       settings: {
         projectToken: MIXPANEL_PROJECT_TOKEN,
-        apiSecret: MIXPANEL_API_SECRET
+        apiRegion: ApiRegions.US
+      }
+    })
+    expect(responses.length).toBe(1)
+    expect(responses[0].status).toBe(200)
+    expect(responses[0].data).toMatchObject({})
+    expect(responses[0].options.body).toMatchObject(
+      new URLSearchParams({
+        data: JSON.stringify({
+          $token: MIXPANEL_PROJECT_TOKEN,
+          $group_key: '$group_id',
+          $group_id: 'test-group-id',
+          $set: {
+            hello: 'world',
+            company: 'Mixpanel'
+          }
+        })
+      })
+    )
+  })
+
+  it('should use EU server URL', async () => {
+    const event = createTestEvent({
+      timestamp,
+      groupId: 'test-group-id',
+      traits: { hello: 'world', company: 'Mixpanel' }
+    })
+
+    nock('https://api-eu.mixpanel.com').post('/groups').reply(200, {})
+
+    const responses = await testDestination.testAction('groupIdentifyUser', {
+      event,
+      useDefaultMappings: true,
+      settings: {
+        projectToken: MIXPANEL_PROJECT_TOKEN,
+        apiRegion: ApiRegions.EU
+      }
+    })
+    expect(responses.length).toBe(1)
+    expect(responses[0].status).toBe(200)
+    expect(responses[0].data).toMatchObject({})
+    expect(responses[0].options.body).toMatchObject(
+      new URLSearchParams({
+        data: JSON.stringify({
+          $token: MIXPANEL_PROJECT_TOKEN,
+          $group_key: '$group_id',
+          $group_id: 'test-group-id',
+          $set: {
+            hello: 'world',
+            company: 'Mixpanel'
+          }
+        })
+      })
+    )
+  })
+
+  it('should use EU server URL', async () => {
+    const event = createTestEvent({
+      timestamp,
+      groupId: 'test-group-id',
+      traits: { hello: 'world', company: 'Mixpanel' }
+    })
+
+    nock('https://api-eu.mixpanel.com').post('/groups').reply(200, {})
+
+    const responses = await testDestination.testAction('groupIdentifyUser', {
+      event,
+      useDefaultMappings: true,
+      settings: {
+        projectToken: MIXPANEL_PROJECT_TOKEN,
+        apiRegion: ApiRegions.EU
+      }
+    })
+    expect(responses.length).toBe(1)
+    expect(responses[0].status).toBe(200)
+    expect(responses[0].data).toMatchObject({})
+    expect(responses[0].options.body).toMatchObject(
+      new URLSearchParams({
+        data: JSON.stringify({
+          $token: MIXPANEL_PROJECT_TOKEN,
+          $group_key: '$group_id',
+          $group_id: 'test-group-id',
+          $set: {
+            hello: 'world',
+            company: 'Mixpanel'
+          }
+        })
+      })
+    )
+  })
+
+  it('should use IN server URL', async () => {
+    const event = createTestEvent({
+      timestamp,
+      groupId: 'test-group-id',
+      traits: { hello: 'world', company: 'Mixpanel' }
+    })
+    nock('https://api-in.mixpanel.com').post('/groups').reply(200, {})
+    const responses = await testDestination.testAction('groupIdentifyUser', {
+      event,
+      useDefaultMappings: true,
+      settings: {
+        projectToken: MIXPANEL_PROJECT_TOKEN,
+        apiRegion: ApiRegions.IN
+      }
+    })
+    expect(responses.length).toBe(1)
+    expect(responses[0].status).toBe(200)
+    expect(responses[0].data).toMatchObject({})
+    expect(responses[0].options.body).toMatchObject(
+      new URLSearchParams({
+        data: JSON.stringify({
+          $token: MIXPANEL_PROJECT_TOKEN,
+          $group_key: '$group_id',
+          $group_id: 'test-group-id',
+          $set: {
+            hello: 'world',
+            company: 'Mixpanel'
+          }
+        })
+      })
+    )
+  })
+
+  it('should default to US endpoint if apiRegion setting is undefined', async () => {
+    const event = createTestEvent({
+      timestamp,
+      groupId: 'test-group-id',
+      traits: { hello: 'world', company: 'Mixpanel' }
+    })
+
+    nock('https://api.mixpanel.com').post('/groups').reply(200, {})
+
+    const responses = await testDestination.testAction('groupIdentifyUser', {
+      event,
+      useDefaultMappings: true,
+      settings: {
+        projectToken: MIXPANEL_PROJECT_TOKEN,
+      }
+    })
+    expect(responses.length).toBe(1)
+    expect(responses[0].status).toBe(200)
+    expect(responses[0].data).toMatchObject({})
+    expect(responses[0].options.body).toMatchObject(
+      new URLSearchParams({
+        data: JSON.stringify({
+          $token: MIXPANEL_PROJECT_TOKEN,
+          $group_key: '$group_id',
+          $group_id: 'test-group-id',
+          $set: {
+            hello: 'world',
+            company: 'Mixpanel'
+          }
+        })
+      })
+    )
+  })
+
+  it('should send segment_source_name property if sourceName setting is defined', async () => {
+    const event = createTestEvent({
+      timestamp,
+      groupId: 'test-group-id',
+      traits: { hello: 'world', company: 'Mixpanel' }
+    })
+
+    nock('https://api.mixpanel.com').post('/groups').reply(200, {})
+
+    const responses = await testDestination.testAction('groupIdentifyUser', {
+      event,
+      useDefaultMappings: true,
+      settings: {
+        projectToken: MIXPANEL_PROJECT_TOKEN,
+        sourceName: 'example segment source name'
       }
     })
     expect(responses.length).toBe(1)

@@ -1,4 +1,4 @@
-import type { ManifestEntry as BrowserManifest, BrowserDestinationDefinition } from '@segment/browser-destinations'
+import type { ManifestEntry as BrowserManifest, BrowserDestinationDefinition } from '@segment/destinations-manifest'
 import type { DestinationDefinition as CloudDestinationDefinition } from '@segment/actions-core'
 import type { ManifestEntry as CloudManifest } from '@segment/action-destinations'
 import path from 'path'
@@ -36,8 +36,12 @@ export async function loadDestination(filePath: string): Promise<null | Destinat
 // So here we need to intelligently merge them until we explore colocating all actions with a single
 // definition file.
 export const getManifest: () => Record<string, CloudManifest | BrowserManifest> = () => {
-  const { manifest: browserManifest } = require('@segment/browser-destinations')
-  const { manifest: cloudManifest } = require('@segment/action-destinations')
+  // Resolve from cwd so the workspace-built versions are used,
+  // not potentially stale published copies in packages/cli/node_modules.
+  // Note: assumes the CLI is invoked from the repo root (e.g. via ./bin/run or yarn scripts).
+  const cwd = process.cwd()
+  const { manifest: browserManifest } = require(require.resolve('@segment/destinations-manifest', { paths: [cwd] }))
+  const { manifest: cloudManifest } = require(require.resolve('@segment/action-destinations', { paths: [cwd] }))
   const { mergeWith } = require('lodash')
 
   // eslint-disable-next-line @typescript-eslint/no-unsafe-call
@@ -54,6 +58,13 @@ export const getManifest: () => Record<string, CloudManifest | BrowserManifest> 
       }
 
       objValue.definition.actions[actionKey] = action
+
+      const cloudDef = objValue.definition as any
+      for (const [settingsKey, setting] of Object.entries((srcValue as any).definition?.settings ?? {})) {
+        if (cloudDef.authentication) {
+          cloudDef.authentication.fields[settingsKey] = setting
+        }
+      }
     }
 
     return objValue

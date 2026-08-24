@@ -1,6 +1,32 @@
-import { Destination, DestinationDefinition } from '../destination-kit'
+import { ErrorCodes, IntegrationError } from '../errors'
+import {
+  ActionDefinition,
+  AsyncActionDefinition,
+  MultiStatusResponse,
+  ActionDestinationErrorResponse,
+  PollPayload,
+  PollResponse,
+  AsyncBatchResponse
+} from '../destination-kit/action'
+import {
+  StateContext,
+  Destination,
+  DestinationDefinition,
+  Logger,
+  StatsClient,
+  StatsContext,
+  TransactionContext,
+  AuthenticationScheme,
+  RefreshAccessTokenResult,
+  AudienceDestinationDefinition,
+  OAuth2Authentication,
+  OAuthManagedAuthentication,
+  Personas
+} from '../destination-kit'
 import { JSONObject } from '../json-object'
 import { SegmentEvent } from '../segment-event'
+const WRONG_ADVERTISER_ID = '12861247612'
+const WRONG_AUDIENCE_ID = '1234567890'
 
 const destinationCustomAuth: DestinationDefinition<JSONObject> = {
   name: 'Actions Google Analytic 4',
@@ -68,6 +94,462 @@ const destinationOAuth2: DestinationDefinition<JSONObject> = {
     }
   }
 }
+const authentication: AuthenticationScheme<JSONObject> = {
+  scheme: 'oauth2',
+  fields: {
+    apiSecret: {
+      label: 'API secret',
+      description: 'Api key',
+      type: 'string',
+      required: true
+    }
+  },
+  refreshAccessToken: (_request) => {
+    return new Promise((resolve, _reject) => {
+      resolve({ accessToken: 'fresh-token' })
+    })
+  }
+}
+
+const destinationOAuth3: DestinationDefinition<JSONObject> = {
+  name: 'Actions Google Analytic 5',
+  mode: 'cloud',
+  authentication: authentication,
+  onDelete: async (_request, { auth, payload }) => {
+    if (auth?.accessToken == 'invalid-access-token') {
+      return new Promise((_resolve, reject) => {
+        reject(new IntegrationError('Unauthorized', 'UNAUTHORIZED', 401))
+      })
+    }
+
+    // it could be due to invalid input or Bad Request
+    if (!payload?.userId) {
+      return new Promise((_resolve, reject) => {
+        reject(new IntegrationError('Wrong AdvertiserId Value', 'BAD REQUEST', 400))
+      })
+    }
+    return new Promise((resolve, _reject) => {
+      resolve({ output: 'Deleted' })
+    })
+  },
+  actions: {
+    customEvent: {
+      title: 'Send a Custom Event',
+      description: 'Send events to a custom event in API',
+      defaultSubscription: 'type = "track"',
+      fields: {
+        advertiserId: {
+          label: 'Advertiser ID',
+          description: 'Advertiser Id',
+          type: 'string',
+          required: true
+        }
+      },
+      perform: (_request: any, { auth, payload }) => {
+        if (auth?.accessToken == 'invalid-access-token') {
+          return new Promise((_resolve, reject) => {
+            reject(new IntegrationError('Unauthorized', 'UNAUTHORIZED', 401))
+          })
+        }
+
+        // it could be due to invalid input or Bad Request
+        if (!payload?.advertiserId)
+          throw new IntegrationError('Missing advertiserId Value', 'MISSING_REQUIRED_FIELD', 400)
+
+        return new Promise((resolve, _reject) => {
+          resolve('this is a test')
+        })
+      },
+      performBatch: (_request, { auth, payload }) => {
+        if (auth?.accessToken == 'invalid-access-token') {
+          return new Promise((_resolve, reject) => {
+            reject(new IntegrationError('Unauthorized', 'UNAUTHORIZED', 401))
+          })
+        }
+
+        // it could be due to invalid input in Batch API Response, Entire Batch Failed !
+        if (payload[0]?.advertiserId == WRONG_ADVERTISER_ID) {
+          return new Promise((_resolve, reject) => {
+            reject(new IntegrationError('Wrong AdvertiserId Value', 'BAD REQUEST', 400))
+          })
+        }
+
+        return new Promise((resolve, _reject) => {
+          resolve('this is a test')
+        })
+      }
+    }
+  }
+}
+
+const audienceDestination: AudienceDestinationDefinition<JSONObject> = {
+  name: 'Amazon AMC (Actions)',
+  mode: 'cloud',
+  authentication: authentication,
+  audienceFields: {
+    advertiserId: {
+      label: 'Advertiser ID',
+      description: 'Advertiser Id',
+      type: 'string',
+      required: true
+    },
+    cpmCents: {
+      label: 'CPM Cents',
+      type: 'number',
+      description: `Cost per thousand impressions (CPM) in cents. For example, $1.00 = 100 cents.`
+    }
+  },
+  audienceConfig: {
+    mode: {
+      type: 'synced', // Indicates that the audience is synced on some schedule; update as necessary
+      full_audience_sync: false // If true, we send the entire audience. If false, we just send the delta.
+    },
+
+    // Mocked createAudience Handler
+    async createAudience(_request, createAudienceInput) {
+      const settings: any = createAudienceInput.settings
+      const audienceSettings: any = createAudienceInput.audienceSettings
+
+      // it could be due to invalid input or Bad Request
+      if (!audienceSettings?.advertiserId) {
+        throw new IntegrationError('Missing advertiserId Value', 'MISSING_REQUIRED_FIELD', 400)
+      }
+      // invalid access token
+      if (settings.oauth.access_token == 'invalid-access-token' || settings.oauth.clientId == 'invalid_client_id') {
+        return new Promise((_resolve, reject) => {
+          reject(new IntegrationError('Unauthorized', 'UNAUTHORIZED', 401))
+        })
+      }
+
+      return new Promise((resolve, _reject) => {
+        resolve({ externalId: '123456789' })
+      })
+    },
+
+    // Mocked getAudience Handler
+    async getAudience(_request, getAudienceInput) {
+      const settings: any = getAudienceInput.settings
+      const audience_id = getAudienceInput.externalId
+
+      if (audience_id == WRONG_AUDIENCE_ID) {
+        throw new IntegrationError('audienceId not found', 'AUDIENCEID_NOT_FOUND', 400)
+      }
+
+      if (settings.oauth.access_token == 'invalid-access-token' || settings.oauth.clientId == 'invalid_client_id') {
+        return new Promise((_resolve, reject) => {
+          reject(new IntegrationError('Unauthorized', 'UNAUTHORIZED', 401))
+        })
+      }
+
+      return new Promise((resolve, _reject) => {
+        resolve({ externalId: audience_id })
+      })
+    }
+  },
+  actions: {}
+}
+
+const destinationWithOptions: DestinationDefinition<JSONObject> = {
+  name: 'Actions Google Analytic 4',
+  mode: 'cloud',
+  authentication: {
+    scheme: 'oauth2',
+    fields: {
+      apiSecret: {
+        label: 'API secret',
+        description: 'Api key',
+        type: 'string',
+        required: true
+      }
+    },
+    refreshAccessToken: (_request) => {
+      return new Promise((resolve, _reject) => {
+        setTimeout(() => {
+          resolve({ accessToken: 'fresh-token' })
+        }, 3)
+      })
+    }
+  },
+  actions: {
+    customEvent: {
+      title: 'Send a Custom Event',
+      description: 'Send events to a custom event in API',
+      defaultSubscription: 'type = "track"',
+      fields: {},
+      perform: (_request, { features, statsContext, logger, transactionContext, stateContext }) => {
+        return { features, statsContext, logger, transactionContext, stateContext }
+      }
+    }
+  }
+}
+
+const destinationWithSyncMode: DestinationDefinition<JSONObject> = {
+  name: 'Actions Google Analytics 4',
+  mode: 'cloud',
+  actions: {
+    customEvent: {
+      title: 'Send a Custom Event',
+      description: 'Send events to a custom event in API',
+      defaultSubscription: 'type = "track"',
+      fields: {},
+      syncMode: {
+        default: 'add',
+        description: 'Select the sync mode for the subscription',
+        label: 'Sync Mode',
+        choices: [
+          {
+            label: 'Insert',
+            value: 'add'
+          },
+          {
+            label: 'Delete',
+            value: 'delete'
+          }
+        ]
+      },
+      perform: (_request, { syncMode }) => {
+        return ['this is a test', syncMode]
+      },
+      performBatch: (_request, { syncMode }) => {
+        return ['this is a test', syncMode]
+      }
+    }
+  }
+}
+
+const destinationWithIdentifier: DestinationDefinition<JSONObject> = {
+  name: 'Actions Google Analytics 4',
+  mode: 'cloud',
+  actions: {
+    customEvent: {
+      title: 'Send a Custom Event',
+      description: 'Send events to a custom event in API',
+      defaultSubscription: 'type = "track"',
+      fields: {
+        userId: {
+          label: 'User ID',
+          description: 'The user ID',
+          type: 'string',
+          required: true,
+          category: 'identifier'
+        }
+      },
+      perform: (_request, { matchingKey }) => {
+        return ['this is a test', matchingKey]
+      },
+      performBatch: (_request, { matchingKey }) => {
+        return ['this is a test', matchingKey]
+      }
+    }
+  }
+}
+
+const multiStatusCompatibleDestination: DestinationDefinition<JSONObject> = {
+  name: 'Actions Braze',
+  mode: 'cloud',
+  actions: {
+    trackEvent: {
+      title: 'Track Event',
+      description: 'Record custom events in Braze',
+      defaultSubscription: 'type = "track" and event != "Order Completed"',
+      fields: {
+        name: {
+          label: 'Event Name',
+          description: 'The event name',
+          type: 'string',
+          required: true
+        },
+        email: {
+          label: 'Email',
+          description: 'The user email',
+          type: 'string'
+        },
+        phone: {
+          label: 'Phone',
+          description: 'The user phone number',
+          type: 'string'
+        }
+      },
+      perform: (_request, { payload }) => {
+        // Emulate an API error
+        if (payload.phone) {
+          throw new IntegrationError('Phone number validation failed', 'Invalid Phone Number', 400)
+        }
+
+        if (payload.email) {
+          throw new IntegrationError('Email is required', 'Missing required fields', 400)
+        }
+
+        return {
+          events_processed: 1,
+          message: 'success'
+        }
+      },
+      performBatch: (_request, { payload, auth }) => {
+        const response = new MultiStatusResponse()
+        payload.forEach((event) => {
+          // Emulate an API error
+          if (event?.phone) {
+            response.pushErrorResponse({
+              status: 400,
+              errortype: ErrorCodes.BAD_REQUEST,
+              errormessage: 'Phone number validation failed',
+              sent: event,
+              body: {
+                events_processed: 0,
+                message: 'Phone number validation failed'
+              }
+            })
+            return
+          }
+
+          // Emulate Auth error
+          if (auth?.accessToken === 'OldToken') {
+            response.pushErrorResponse({
+              status: 401,
+              errortype: ErrorCodes.INVALID_AUTHENTICATION,
+              errormessage: 'Invalid Auth',
+              sent: event,
+              body: {
+                events_processed: 0,
+                message: 'Invalid Auth'
+              }
+            })
+            return
+          }
+
+          if (event?.email) {
+            response.pushSuccessResponse({
+              body: {},
+              sent: {},
+              status: 200
+            })
+          } else {
+            response.pushErrorResponse({
+              status: 400,
+              errortype: ErrorCodes.PAYLOAD_VALIDATION_FAILED,
+              errormessage: 'Email is required'
+            })
+          }
+        })
+
+        return response
+      }
+    }
+  }
+}
+
+interface Payload {
+  testDynamicField: string
+  testUnstructuredObject: Record<string, string>
+  testStructuredObject: {
+    testDynamicSubfield: string
+  }
+  testObjectArrays: Array<{ testDynamicSubfield: string }>
+}
+
+const destinationWithDynamicFields: DestinationDefinition<JSONObject> = {
+  name: 'Actions Dynamic Fields',
+  mode: 'cloud',
+  actions: {
+    customEvent: {
+      title: 'Send a Custom Event',
+      description: 'Send events to a custom event in API',
+      defaultSubscription: 'type = "track"',
+      fields: {
+        testDynamicField: {
+          label: 'Dynamic Field',
+          description: 'A dynamic field',
+          type: 'string',
+          required: true,
+          dynamic: true
+        },
+        testUnstructuredObject: {
+          label: 'Unstructured Object',
+          description: 'An unstructured object',
+          type: 'object',
+          dynamic: true
+        },
+        testStructuredObject: {
+          label: 'Structured Object',
+          description: 'A structured object',
+          type: 'object',
+          properties: {
+            testDynamicSubfield: {
+              label: 'Test Field',
+              description: 'A test field',
+              type: 'string',
+              required: true,
+              dynamic: true
+            }
+          }
+        },
+        testObjectArrays: {
+          label: 'Structured Array of Object',
+          description: 'A structured array of object',
+          type: 'object',
+          multiple: true,
+          properties: {
+            testDynamicSubfield: {
+              label: 'Test Field',
+              description: 'A test field',
+              type: 'string',
+              required: true,
+              dynamic: true
+            }
+          }
+        }
+      },
+      dynamicFields: {
+        testDynamicField: async () => {
+          return {
+            choices: [{ label: 'test', value: 'test' }],
+            nextPage: ''
+          }
+        },
+        testUnstructuredObject: {
+          __keys__: async () => {
+            return {
+              choices: [{ label: 'Im a key', value: '🔑' }],
+              nextPage: ''
+            }
+          },
+          __values__: async (_, input) => {
+            const { dynamicFieldContext } = input
+
+            return {
+              choices: [{ label: `Im a value for ${dynamicFieldContext?.selectedKey}`, value: '2️⃣' }],
+              nextPage: ''
+            }
+          }
+        },
+        testStructuredObject: {
+          testDynamicSubfield: async () => {
+            return {
+              choices: [{ label: 'Im a subfield', value: 'nah' }],
+              nextPage: ''
+            }
+          }
+        },
+        testObjectArrays: {
+          testDynamicSubfield: async (_, input) => {
+            const { dynamicFieldContext } = input
+
+            return {
+              choices: [
+                { label: `Im a subfield for element ${dynamicFieldContext?.selectedArrayIndex}`, value: 'nah' }
+              ],
+              nextPage: ''
+            }
+          }
+        }
+      },
+      perform: (_request, { syncMode }) => {
+        return ['this is a test', syncMode]
+      }
+    } as ActionDefinition<JSONObject, Payload>
+  }
+}
 
 describe('destination kit', () => {
   describe('event validations', () => {
@@ -76,7 +558,7 @@ describe('destination kit', () => {
       const testEvent: SegmentEvent = { type: 'track' }
       const testSettings = { apiSecret: 'test_key', subscription: { subscribe: '', partnerAction: 'customEvent' } }
       const res = await destinationTest.onEvent(testEvent, testSettings)
-      expect(res).toEqual([{ output: 'invalid subscription' }])
+      expect(res).toEqual([{ output: 'Failed to validate subscription' }])
     })
 
     test('should return invalid subscription with details when sending an invalid subscribe', async () => {
@@ -84,7 +566,8 @@ describe('destination kit', () => {
       const testEvent: SegmentEvent = { type: 'track' }
       const testSettings = { apiSecret: 'test_key', subscription: { subscribe: 'typo', partnerAction: 'customEvent' } }
       const res = await destinationTest.onEvent(testEvent, testSettings)
-      expect(res).toEqual([{ output: "invalid subscription : Cannot read property 'type' of undefined" }])
+      expect(res).toEqual([{ output: expect.stringContaining('Invalid subscription') }])
+      expect(res[0].output).toContain('Cannot read')
     })
 
     test('should return `not subscribed` when providing an empty event', async () => {
@@ -136,7 +619,7 @@ describe('destination kit', () => {
       expect(res).toEqual([
         { output: 'Mappings resolved' },
         { output: 'Payload validated' },
-        { output: ['this is a test', {}] }
+        { output: 'Action Executed', data: ['this is a test', {}] }
       ])
     })
 
@@ -162,12 +645,11 @@ describe('destination kit', () => {
           }
         }
       }
-
       const res = await destinationTest.onEvent(testEvent, testSettings)
       expect(res).toEqual([
         { output: 'Mappings resolved' },
         { output: 'Payload validated' },
-        { output: ['this is a test', {}] }
+        { output: 'Action Executed', data: ['this is a test', {}] }
       ])
     })
 
@@ -198,7 +680,7 @@ describe('destination kit', () => {
       expect(res).toEqual([
         { output: 'Mappings resolved' },
         { output: 'Payload validated' },
-        { output: ['this is a test', {}] }
+        { output: 'Action Executed', data: ['this is a test', {}] }
       ])
     })
   })
@@ -229,8 +711,98 @@ describe('destination kit', () => {
       expect(res).toEqual([
         { output: 'Mappings resolved' },
         { output: 'Payload validated' },
-        { output: ['this is a test', {}] }
+        { output: 'Action Executed', data: ['this is a test', {}] }
       ])
+    })
+
+    test('should inject the syncMode value in the perform handler', async () => {
+      const destinationTest = new Destination(destinationWithSyncMode)
+      const testEvent: SegmentEvent = { type: 'track' }
+      const testSettings = {
+        apiSecret: 'test_key',
+        subscription: {
+          subscribe: 'type = "track"',
+          partnerAction: 'customEvent',
+          mapping: {
+            __segment_internal_sync_mode: 'add'
+          }
+        }
+      }
+
+      const res = await destinationTest.onEvent(testEvent, testSettings)
+
+      expect(res).toEqual([
+        { output: 'Mappings resolved' },
+        {
+          output: 'Action Executed',
+          data: ['this is a test', 'add']
+        }
+      ])
+    })
+
+    test('should inject the syncMode value in the performBatch handler', async () => {
+      const destinationTest = new Destination(destinationWithSyncMode)
+      const testEvent: SegmentEvent = { type: 'track' }
+      const testSettings = {
+        apiSecret: 'test_key',
+        subscription: {
+          subscribe: 'type = "track"',
+          partnerAction: 'customEvent',
+          mapping: {
+            __segment_internal_sync_mode: 'add'
+          }
+        }
+      }
+
+      const res = await destinationTest.onBatch([testEvent], testSettings)
+
+      expect(res).toEqual([
+        {
+          multistatus: [{ body: {}, sent: { __segment_internal_sync_mode: 'add' }, status: 200 }]
+        }
+      ])
+    })
+    test('should inject the matchingKey value in the perform handler', async () => {
+      const destinationTest = new Destination(destinationWithIdentifier)
+      const testEvent: SegmentEvent = { type: 'track' }
+      const testSettings = {
+        apiSecret: 'test_key',
+        subscription: {
+          subscribe: 'type = "track"',
+          partnerAction: 'customEvent',
+          mapping: {
+            __segment_internal_matching_key: 'userId',
+            userId: 'this-is-a-user-id'
+          }
+        }
+      }
+      const res = await destinationTest.onEvent(testEvent, testSettings)
+      expect(res).toEqual([
+        { output: 'Mappings resolved' },
+        { output: 'Payload validated' },
+        {
+          output: 'Action Executed',
+          data: ['this is a test', 'userId']
+        }
+      ])
+    })
+    test('should inject the matchingKey value in the performBatch handler', async () => {
+      const destinationTest = new Destination(destinationWithIdentifier)
+      const testEvent: SegmentEvent = { type: 'track' }
+      const testSettings = {
+        subscription: {
+          subscribe: 'type = "track"',
+          partnerAction: 'customEvent',
+          mapping: {
+            __segment_internal_matching_key: 'userId',
+            userId: 'this-is-a-user-id'
+          }
+        }
+      }
+
+      const res = await destinationTest.onBatch([testEvent], testSettings)
+
+      expect(res).toEqual([{ multistatus: [{ body: {}, sent: { userId: 'this-is-a-user-id' }, status: 200 }] }])
     })
   })
 
@@ -244,12 +816,13 @@ describe('destination kit', () => {
         accessToken: 'test-access-token',
         refreshToken: 'refresh-token',
         clientId: 'test-clientid',
-        clientSecret: 'test-clientsecret'
+        clientSecret: 'test-clientsecret',
+        refreshTokenUrl: 'abc123.xyz'
       }
       try {
         await destinationTest.refreshAccessToken(testSettings, oauthData)
         fail('test should have thrown a NotImplemented error')
-      } catch (e) {
+      } catch (e: any) {
         expect(e.status).toEqual(501)
         expect(e.message).toEqual('refreshAccessToken is only valid with oauth2 authentication scheme')
         expect(e.code).toEqual('NotImplemented')
@@ -265,11 +838,1888 @@ describe('destination kit', () => {
         accessToken: 'test-access-token',
         refreshToken: 'refresh-token',
         clientId: 'test-clientid',
-        clientSecret: 'test-clientsecret'
+        clientSecret: 'test-clientsecret',
+        refreshTokenUrl: 'abc123.xyz'
       }
       const res = await destinationTest.refreshAccessToken(testSettings, oauthData)
 
       expect(res).toEqual({ accessToken: 'fresh-token' })
+    })
+
+    test('should invoke synchronizeRefreshAccessToken if defined', async () => {
+      const destinationTest = new Destination(destinationOAuth2)
+
+      const testSettings = {
+        apiSecret: 'test_key',
+        subscription: {
+          subscribe: 'type = "track"',
+          partnerAction: 'customEvent',
+          mapping: {
+            clientId: '23455343467',
+            name: 'fancy_event',
+            parameters: { field_one: 'rogue one' }
+          }
+        }
+      }
+
+      const acquireLockMock = jest.fn(() => Promise.resolve())
+
+      await expect(
+        destinationTest.refreshAccessToken(
+          testSettings,
+          { clientId: '', clientSecret: '', accessToken: '', refreshToken: '' },
+          acquireLockMock
+        )
+      ).resolves.not.toThrowError()
+      expect(acquireLockMock).toHaveBeenCalledTimes(1)
+    })
+
+    test('should succeed if synchronizeRefreshAccessToken handler is not passed in event options', async () => {
+      const destinationTest = new Destination(destinationOAuth2)
+
+      const testSettings = {
+        apiSecret: 'test_key',
+        subscription: {
+          subscribe: 'type = "track"',
+          partnerAction: 'customEvent',
+          mapping: {
+            clientId: '23455343467',
+            name: 'fancy_event',
+            parameters: { field_one: 'rogue one' }
+          }
+        }
+      }
+
+      await expect(
+        destinationTest.refreshAccessToken(testSettings, {
+          clientId: '',
+          clientSecret: '',
+          accessToken: '',
+          refreshToken: ''
+        })
+      ).resolves.not.toThrowError()
+    })
+  })
+
+  describe('features', () => {
+    test('should not crash when features are passed to the perform handler', async () => {
+      const destinationTest = new Destination(destinationWithOptions)
+      const testEvent: SegmentEvent = {
+        properties: { field_one: 'test input' },
+        userId: '3456fff',
+        type: 'track'
+      }
+      const testSettings = {
+        apiSecret: 'test_key',
+        subscription: {
+          subscribe: 'type = "track"',
+          partnerAction: 'customEvent',
+          mapping: {
+            clientId: '23455343467',
+            name: 'fancy_event',
+            parameters: { field_one: 'rogue one' }
+          }
+        }
+      }
+      const eventOptions = {
+        features: {
+          test_feature: true
+        },
+        statsContext: {} as StatsContext
+      }
+
+      const res = await destinationTest.onEvent(testEvent, testSettings, eventOptions)
+
+      expect(res).toEqual([
+        { output: 'Mappings resolved' },
+        {
+          output: 'Action Executed',
+          data: {
+            features: eventOptions.features,
+            statsContext: {}
+          }
+        }
+      ])
+    })
+  })
+
+  describe('stats', () => {
+    test('should not crash when stats are passed to the perform handler', async () => {
+      const destinationTest = new Destination(destinationWithOptions)
+      const testEvent: SegmentEvent = {
+        properties: { field_one: 'test input' },
+        userId: '3456fff',
+        type: 'track'
+      }
+      const testSettings = {
+        apiSecret: 'test_key',
+        subscription: {
+          subscribe: 'type = "track"',
+          partnerAction: 'customEvent',
+          mapping: {
+            clientId: '23455343467',
+            name: 'fancy_event',
+            parameters: { field_one: 'rogue one' }
+          }
+        }
+      }
+      const eventOptions = {
+        statsContext: {
+          statsClient: {} as StatsClient,
+          tags: []
+        }
+      }
+
+      const res = await destinationTest.onEvent(testEvent, testSettings, eventOptions)
+
+      expect(res).toEqual([
+        { output: 'Mappings resolved' },
+        {
+          output: 'Action Executed',
+          data: {
+            features: {},
+            statsContext: eventOptions.statsContext
+          }
+        }
+      ])
+    })
+  })
+
+  describe('logger', () => {
+    test('should not crash when logger is passed to the perform handler', async () => {
+      const destinationTest = new Destination(destinationWithOptions)
+      const testEvent: SegmentEvent = {
+        properties: { field_one: 'test input' },
+        userId: '3456fff',
+        type: 'track'
+      }
+      const testSettings = {
+        apiSecret: 'test_key',
+        subscription: {
+          subscribe: 'type = "track"',
+          partnerAction: 'customEvent',
+          mapping: {
+            clientId: '23455343467',
+            name: 'fancy_event',
+            parameters: { field_one: 'rogue one' }
+          }
+        }
+      }
+      const eventOptions = {
+        features: {},
+        statsContext: {} as StatsContext,
+        logger: { name: 'test-integration', level: 'debug' } as Logger
+      }
+      const res = await destinationTest.onEvent(testEvent, testSettings, eventOptions)
+      expect(res).toEqual([
+        { output: 'Mappings resolved' },
+        {
+          output: 'Action Executed',
+          data: {
+            features: {},
+            statsContext: {},
+            logger: eventOptions.logger
+          }
+        }
+      ])
+    })
+  })
+
+  describe('personasContext', () => {
+    const destinationWithPersonasContext: DestinationDefinition<JSONObject> = {
+      name: 'Test Destination',
+      mode: 'cloud',
+      actions: {
+        customEvent: {
+          title: 'Custom Event',
+          description: 'Test action',
+          defaultSubscription: 'type = "track"',
+          fields: {},
+          perform: (_request, { personasContext }) => {
+            return { personasContext }
+          }
+        }
+      }
+    }
+
+    const testSettings = {
+      subscription: {
+        subscribe: 'type = "track"',
+        partnerAction: 'customEvent',
+        mapping: {}
+      }
+    }
+
+    test('should populate personasContext from event.context.personas', async () => {
+      const destinationTest = new Destination(destinationWithPersonasContext)
+      const personas: Personas = { computation_key: 'my-audience', computation_id: 'comp-1', namespace: 'ns' }
+      const testEvent: SegmentEvent = {
+        type: 'track',
+        userId: 'user-1',
+        context: { personas }
+      }
+
+      const res = await destinationTest.onEvent(testEvent, testSettings, { statsContext: {} as StatsContext })
+
+      expect(res).toEqual([
+        { output: 'Mappings resolved' },
+        { output: 'Action Executed', data: { personasContext: personas } }
+      ])
+    })
+
+    test('should set personasContext to undefined for non-Personas events', async () => {
+      const destinationTest = new Destination(destinationWithPersonasContext)
+      const testEvent: SegmentEvent = {
+        type: 'track',
+        userId: 'user-1'
+      }
+
+      const res = await destinationTest.onEvent(testEvent, testSettings, { statsContext: {} as StatsContext })
+
+      expect(res).toEqual([
+        { output: 'Mappings resolved' },
+        { output: 'Action Executed', data: { personasContext: undefined } }
+      ])
+    })
+
+    test('should populate personasContext from events[0] in onBatch', async () => {
+      const personas: Personas = { computation_key: 'batch-audience', computation_id: 'comp-2', namespace: 'ns' }
+      let capturedPersonasContext: Personas | undefined = null as any
+      const destinationWithBatch: DestinationDefinition<JSONObject> = {
+        name: 'Test Destination',
+        mode: 'cloud',
+        actions: {
+          customEvent: {
+            title: 'Custom Event',
+            description: 'Test action',
+            defaultSubscription: 'type = "track"',
+            fields: {},
+            perform: (_request, _data) => {
+              return {}
+            },
+            performBatch: (_request, { personasContext }) => {
+              capturedPersonasContext = personasContext
+              return [{}]
+            }
+          }
+        }
+      }
+      const destinationTest = new Destination(destinationWithBatch)
+      const batchSettings = {
+        subscription: {
+          subscribe: 'type = "track"',
+          partnerAction: 'customEvent',
+          mapping: {}
+        }
+      }
+      const testEvent: SegmentEvent = { type: 'track', userId: 'user-1', context: { personas } }
+
+      await destinationTest.onBatch([testEvent], batchSettings, { statsContext: {} as StatsContext })
+
+      expect(capturedPersonasContext).toEqual(personas)
+    })
+
+    test('should set personasContext to undefined in onBatch for non-Personas events', async () => {
+      let capturedPersonasContext: Personas | undefined = 'sentinel' as any
+      const destinationWithBatch: DestinationDefinition<JSONObject> = {
+        name: 'Test Destination',
+        mode: 'cloud',
+        actions: {
+          customEvent: {
+            title: 'Custom Event',
+            description: 'Test action',
+            defaultSubscription: 'type = "track"',
+            fields: {},
+            perform: (_request, _data) => {
+              return {}
+            },
+            performBatch: (_request, { personasContext }) => {
+              capturedPersonasContext = personasContext
+              return [{}]
+            }
+          }
+        }
+      }
+      const destinationTest = new Destination(destinationWithBatch)
+      const batchSettings = {
+        subscription: {
+          subscribe: 'type = "track"',
+          partnerAction: 'customEvent',
+          mapping: {}
+        }
+      }
+      const testEvent: SegmentEvent = { type: 'track', userId: 'user-1' }
+
+      await destinationTest.onBatch([testEvent], batchSettings, { statsContext: {} as StatsContext })
+
+      expect(capturedPersonasContext).toBeUndefined()
+    })
+  })
+
+  describe('transactionContext', () => {
+    test('should not crash when transactionContext is passed to the perform handler', async () => {
+      const destinationTest = new Destination(destinationWithOptions)
+      const testEvent: SegmentEvent = {
+        properties: { field_one: 'test input' },
+        userId: '3456fff',
+        type: 'track'
+      }
+      const testSettings = {
+        apiSecret: 'test_key',
+        subscription: {
+          subscribe: 'type = "track"',
+          partnerAction: 'customEvent',
+          mapping: {
+            clientId: '23455343467',
+            name: 'fancy_event',
+            parameters: { field_one: 'rogue one' }
+          }
+        }
+      }
+      const eventOptions = {
+        features: {},
+        statsContext: {} as StatsContext,
+        logger: { name: 'test-integration', level: 'debug' } as Logger,
+        transactionContext: {
+          transaction: { contact_id: '801' },
+          setTransaction: (key: string, value: string) => ({ [key]: value })
+        } as TransactionContext
+      }
+      const res = await destinationTest.onEvent(testEvent, testSettings, eventOptions)
+      expect(res).toEqual([
+        { output: 'Mappings resolved' },
+        {
+          output: 'Action Executed',
+          data: {
+            features: {},
+            statsContext: {},
+            logger: eventOptions.logger,
+            transactionContext: eventOptions.transactionContext
+          }
+        }
+      ])
+    })
+  })
+
+  describe('stateContext', () => {
+    test('should not crash when stateContext is passed to the perform handler', async () => {
+      const destinationTest = new Destination(destinationWithOptions)
+      const testEvent: SegmentEvent = {
+        properties: { field_one: 'test input' },
+        userId: '3456fff',
+        type: 'track'
+      }
+      const testSettings = {
+        apiSecret: 'test_key',
+        subscription: {
+          subscribe: 'type = "track"',
+          partnerAction: 'customEvent',
+          mapping: {
+            clientId: '23455343467',
+            name: 'fancy_event',
+            parameters: { field_one: 'rogue one' }
+          }
+        }
+      }
+      const eventOptions = {
+        features: {},
+        statsContext: {} as StatsContext,
+        logger: { name: 'test-integration', level: 'debug' } as Logger,
+        transactionContext: {
+          transaction: { contact_id: '801' },
+          setTransaction: (key: string, value: string) => ({ [key]: value })
+        } as TransactionContext,
+        stateContext: {
+          getRequestContext: (_key: string, _cb?: (res?: string) => any): any => {},
+          setResponseContext: (
+            _key: string,
+            _value: string,
+            _ttl: { hour?: number; minute?: number; second?: number }
+          ): void => {}
+        } as StateContext
+      }
+      const res = await destinationTest.onEvent(testEvent, testSettings, eventOptions)
+      expect(res).toEqual([
+        { output: 'Mappings resolved' },
+        {
+          output: 'Action Executed',
+          data: {
+            features: {},
+            statsContext: {},
+            logger: eventOptions.logger,
+            transactionContext: eventOptions.transactionContext,
+            stateContext: eventOptions.stateContext
+          }
+        }
+      ])
+    })
+  })
+
+  describe('dynamicFields', () => {
+    test('should return empty array if action is not part of definition', async () => {
+      const destinationTest = new Destination(destinationWithDynamicFields)
+      const res = await destinationTest.executeDynamicField('ghostAction', 'testDynamicField', {
+        settings: {},
+        payload: {}
+      })
+      expect(res).toEqual({ choices: [] })
+    })
+
+    test('should return 404 if handler for dynamic field does not exist', async () => {
+      const destinationTest = new Destination(destinationWithDynamicFields)
+      const res = await destinationTest.executeDynamicField('customEvent', 'randomField', {
+        settings: {},
+        payload: {}
+      })
+      expect(res).toEqual({
+        choices: [],
+        error: { code: '404', message: 'No dynamic field named randomField found.' },
+        nextPage: ''
+      })
+    })
+
+    test('should return a response with choices for string fields', async () => {
+      const destinationTest = new Destination(destinationWithDynamicFields)
+      const res = await destinationTest.executeDynamicField('customEvent', 'testDynamicField', {
+        settings: {},
+        payload: {}
+      })
+      expect(res).toEqual({ choices: [{ label: 'test', value: 'test' }], nextPage: '' })
+    })
+
+    test('fetches keys for unstructured objects', async () => {
+      const destinationTest = new Destination(destinationWithDynamicFields)
+      const res = await destinationTest.executeDynamicField('customEvent', 'testUnstructuredObject.__keys__', {
+        settings: {},
+        payload: {}
+      })
+      expect(res).toEqual({ choices: [{ label: 'Im a key', value: '🔑' }], nextPage: '' })
+    })
+
+    test('fetches values for unstructured objects', async () => {
+      const destinationTest = new Destination(destinationWithDynamicFields)
+      ;('testUnstructuredObject.__values__')
+      let res = await destinationTest.executeDynamicField('customEvent', 'testUnstructuredObject.keyOne', {
+        settings: {},
+        payload: {}
+      })
+      expect(res).toEqual({ choices: [{ label: 'Im a value for keyOne', value: '2️⃣' }], nextPage: '' })
+
+      res = await destinationTest.executeDynamicField('customEvent', 'testUnstructuredObject.keyTwo', {
+        settings: {},
+        payload: {}
+      })
+
+      expect(res).toEqual({ choices: [{ label: 'Im a value for keyTwo', value: '2️⃣' }], nextPage: '' })
+    })
+
+    test('fetches values for structured object subfields', async () => {
+      const destinationTest = new Destination(destinationWithDynamicFields)
+      const res = await destinationTest.executeDynamicField('customEvent', 'testStructuredObject.testDynamicSubfield', {
+        settings: {},
+        payload: {}
+      })
+      expect(res).toEqual({ choices: [{ label: 'Im a subfield', value: 'nah' }], nextPage: '' })
+    })
+
+    test('fetches values for structured array of object', async () => {
+      const destinationTest = new Destination(destinationWithDynamicFields)
+      let res = await destinationTest.executeDynamicField('customEvent', 'testObjectArrays.[0].testDynamicSubfield', {
+        settings: {},
+        payload: {}
+      })
+      expect(res).toEqual({ choices: [{ label: 'Im a subfield for element 0', value: 'nah' }], nextPage: '' })
+
+      res = await destinationTest.executeDynamicField('customEvent', 'testObjectArrays.[113].testDynamicSubfield', {
+        settings: {},
+        payload: {}
+      })
+      expect(res).toEqual({ choices: [{ label: 'Im a subfield for element 113', value: 'nah' }], nextPage: '' })
+    })
+
+    test('returns 404 for invalid subfields', async () => {
+      const destinationTest = new Destination(destinationWithDynamicFields)
+      const res = await destinationTest.executeDynamicField('customEvent', 'testStructuredObject.ghostSubfield', {
+        settings: {},
+        payload: {}
+      })
+      expect(res).toEqual({
+        choices: [],
+        error: { code: '404', message: 'No dynamic field named testStructuredObject.ghostSubfield found.' },
+        nextPage: ''
+      })
+    })
+  })
+
+  describe('Reauthentication Flow', () => {
+    beforeEach(async () => {
+      jest.restoreAllMocks()
+      jest.resetAllMocks()
+    })
+    describe('onDelete', () => {
+      test('should refresh the access-token in case of Unauthorized(401) and update it in Cache', async () => {
+        const destinationTest = new Destination(destinationOAuth3)
+        const testEvent: SegmentEvent = {
+          traits: { a: 'foo' },
+          userId: '3456fff',
+          type: 'identify'
+        }
+        const testSettings = {
+          apiSecret: 'test_key',
+          subscription: {
+            subscribe: 'type = "identify"',
+            partnerAction: 'customEvent',
+            mapping: {
+              name: 'fancy_event123',
+              advertiserId: '1231241241'
+            }
+          },
+          oauth: {
+            access_token: 'invalid-access-token',
+            refresh_token: 'refresh-token'
+          }
+        }
+        const eventOptions = {
+          onTokenRefresh: async (_tokens: RefreshAccessTokenResult) => {
+            jest.fn(() => Promise.resolve())
+          },
+          synchronizeRefreshAccessToken: async () => {
+            jest.fn(() => Promise.resolve())
+          }
+        }
+        const refreshTokenSpy = jest.spyOn(authentication, 'refreshAccessToken')
+        const UpdateTokenSpy = jest.spyOn(eventOptions, 'onTokenRefresh')
+        const synchronizeRefreshAccessTokenSpy = jest.spyOn(eventOptions, 'synchronizeRefreshAccessToken')
+        const res = await destinationTest.onDelete?.(testEvent, testSettings, eventOptions)
+        expect(res).toEqual({ output: 'Deleted' })
+        expect(refreshTokenSpy).toHaveBeenCalledTimes(1)
+        expect(UpdateTokenSpy).toHaveBeenCalledTimes(1)
+        expect(synchronizeRefreshAccessTokenSpy).toHaveBeenCalledTimes(1)
+      })
+
+      test('should not refresh access-token in case of any non 401 error', async () => {
+        const destinationTest = new Destination(destinationOAuth3)
+        const testEvent: SegmentEvent = {
+          properties: { a: 'foo', field_one: 'test input' },
+          traits: {
+            b: 'foo'
+          },
+          type: 'identify'
+        }
+        const testSettings = {
+          apiSecret: 'test_key',
+          subscription: {
+            subscribe: 'type = "identify" and properties.a = "foo"',
+            partnerAction: 'customEvent',
+            mapping: {
+              clientId: '23455343467',
+              name: 'fancy_event'
+            }
+          },
+          oauth: {
+            access_token: 'valid-access-token',
+            refresh_token: 'refresh-token'
+          }
+        }
+        const eventOptions = {
+          onTokenRefresh: async (_tokens: RefreshAccessTokenResult) => {
+            jest.fn(() => Promise.resolve())
+          },
+          synchronizeRefreshAccessToken: async () => {
+            jest.fn(() => Promise.resolve())
+          }
+        }
+        const spy = jest.spyOn(authentication, 'refreshAccessToken')
+        const UpdateTokenSpy = jest.spyOn(eventOptions, 'onTokenRefresh')
+        const synchronizeRefreshAccessTokenSpy = jest.spyOn(eventOptions, 'synchronizeRefreshAccessToken')
+        await expect(destinationTest.onDelete?.(testEvent, testSettings)).rejects.toThrowError()
+        expect(spy).toHaveBeenCalledTimes(0)
+        expect(UpdateTokenSpy).toHaveBeenCalledTimes(0)
+        expect(synchronizeRefreshAccessTokenSpy).toHaveBeenCalledTimes(0)
+      })
+      test('should not refresh access-token if token is already valid', async () => {
+        const destinationTest = new Destination(destinationOAuth3)
+        const testEvent: SegmentEvent = {
+          properties: { a: 'foo', field_one: 'test input' },
+          traits: {
+            b: 'foo'
+          },
+          userId: '3456fff',
+          type: 'identify'
+        }
+        const testSettings = {
+          apiSecret: 'test_key',
+          subscription: {
+            subscribe: 'type = "identify" and properties.a = "foo"',
+            partnerAction: 'customEvent',
+            mapping: {
+              name: 'fancy_event',
+              advertiserId: '1231241241'
+            }
+          },
+          oauth: {
+            access_token: 'valid-access-token',
+            refresh_token: 'refresh-token'
+          }
+        }
+        const spy = jest.spyOn(authentication, 'refreshAccessToken')
+        const res = await destinationTest.onDelete?.(testEvent, testSettings)
+        expect(res).toEqual({ output: 'Deleted' })
+        expect(spy).toHaveBeenCalledTimes(0)
+      })
+    })
+    describe('onEvent', () => {
+      test('should refresh the access-token in case of Unauthorized(401) and update it in Cache', async () => {
+        const destinationTest = new Destination(destinationOAuth3)
+        const testEvent: SegmentEvent = {
+          traits: { a: 'foo' },
+          userId: '3456fff',
+          type: 'identify'
+        }
+        const testSettings = {
+          apiSecret: 'test_key',
+          subscription: {
+            subscribe: 'type = "identify"',
+            partnerAction: 'customEvent',
+            mapping: {
+              name: 'fancy_event123',
+              advertiserId: '1231241241'
+            }
+          },
+          oauth: {
+            access_token: 'invalid-access-token',
+            refresh_token: 'refresh-token'
+          }
+        }
+
+        const eventOptions = {
+          onTokenRefresh: async (_tokens: RefreshAccessTokenResult) => {
+            jest.fn(() => Promise.resolve())
+          },
+          synchronizeRefreshAccessToken: async () => {
+            jest.fn(() => Promise.resolve())
+          }
+        }
+
+        const refreshTokenSpy = jest.spyOn(authentication, 'refreshAccessToken')
+        const UpdateTokenSpy = jest.spyOn(eventOptions, 'onTokenRefresh')
+        const synchronizeRefreshAccessTokenSpy = jest.spyOn(eventOptions, 'synchronizeRefreshAccessToken')
+
+        const res = await destinationTest.onEvent(testEvent, testSettings, eventOptions)
+        expect(res).toEqual([
+          { output: 'Mappings resolved' },
+          { output: 'Payload validated' },
+          { data: 'this is a test', output: 'Action Executed' }
+        ])
+        expect(refreshTokenSpy).toHaveBeenCalledTimes(1)
+        expect(UpdateTokenSpy).toHaveBeenCalledTimes(1)
+        expect(synchronizeRefreshAccessTokenSpy).toHaveBeenCalledTimes(1)
+      })
+      test('should not refresh access-token in case of any non 401 error', async () => {
+        const destinationTest = new Destination(destinationOAuth3)
+        const testEvent: SegmentEvent = {
+          properties: { a: 'foo', field_one: 'test input' },
+          traits: {
+            b: 'foo'
+          },
+          userId: '3456fff',
+          type: 'identify'
+        }
+        const testSettings = {
+          apiSecret: 'test_key',
+          subscription: {
+            subscribe: 'type = "identify" and properties.a = "foo"',
+            partnerAction: 'customEvent',
+            mapping: {
+              clientId: '23455343467',
+              name: 'fancy_event'
+            }
+          },
+          oauth: {
+            access_token: 'valid-access-token',
+            refresh_token: 'refresh-token'
+          }
+        }
+        const eventOptions = {
+          onTokenRefresh: async (_tokens: RefreshAccessTokenResult) => {
+            jest.fn(() => Promise.resolve())
+          },
+          synchronizeRefreshAccessToken: async () => {
+            jest.fn(() => Promise.resolve())
+          }
+        }
+
+        const spy = jest.spyOn(authentication, 'refreshAccessToken')
+        const UpdateTokenSpy = jest.spyOn(eventOptions, 'onTokenRefresh')
+        const synchronizeRefreshAccessTokenSpy = jest.spyOn(eventOptions, 'synchronizeRefreshAccessToken')
+        await expect(destinationTest.onEvent(testEvent, testSettings)).rejects.toThrowError()
+        expect(spy).toHaveBeenCalledTimes(0)
+        expect(UpdateTokenSpy).toHaveBeenCalledTimes(0)
+        expect(synchronizeRefreshAccessTokenSpy).toHaveBeenCalledTimes(0)
+      })
+
+      test('should not refresh access-token if token is already valid', async () => {
+        const destinationTest = new Destination(destinationOAuth3)
+        const testEvent: SegmentEvent = {
+          properties: { a: 'foo', field_one: 'test input' },
+          traits: {
+            b: 'foo'
+          },
+          userId: '3456fff',
+          type: 'identify'
+        }
+        const testSettings = {
+          apiSecret: 'test_key',
+          subscription: {
+            subscribe: 'type = "identify" and properties.a = "foo"',
+            partnerAction: 'customEvent',
+            mapping: {
+              name: 'fancy_event',
+              advertiserId: '1231241241'
+            }
+          },
+          oauth: {
+            access_token: 'valid-access-token',
+            refresh_token: 'refresh-token'
+          }
+        }
+        const spy = jest.spyOn(authentication, 'refreshAccessToken')
+        const res = await destinationTest.onEvent(testEvent, testSettings)
+        expect(res).toEqual([
+          { output: 'Mappings resolved' },
+          { output: 'Payload validated' },
+          { data: 'this is a test', output: 'Action Executed' }
+        ])
+        expect(spy).toHaveBeenCalledTimes(0)
+      })
+    })
+    describe('onBatch', () => {
+      test('should refresh the access-token in case of Unauthorized(401)', async () => {
+        const destinationTest = new Destination(destinationOAuth3)
+        const testEvents: SegmentEvent[] = [
+          {
+            properties: { a: 'foo', advertiserId: 123456789 },
+            userId: '3456fff',
+            type: 'track'
+          },
+          {
+            properties: { a: 'foo', advertiserId: 987654321 },
+            userId: '3456fff',
+            type: 'track'
+          }
+        ]
+        const testSettings = {
+          apiSecret: 'test_key',
+          subscription: {
+            subscribe: 'type = "track"',
+            partnerAction: 'customEvent',
+            mapping: {
+              name: 'fancy_event123',
+              advertiserId: { '@path': '$.properties.advertiserId' }
+            }
+          },
+          oauth: {
+            access_token: 'invalid-access-token',
+            refresh_token: 'refresh-token'
+          }
+        }
+        const eventOptions = {
+          onTokenRefresh: async (_tokens: RefreshAccessTokenResult) => {
+            jest.fn(() => Promise.resolve())
+          },
+          synchronizeRefreshAccessToken: async () => {
+            jest.fn(() => Promise.resolve())
+          }
+        }
+
+        const refreshTokenSpy = jest.spyOn(authentication, 'refreshAccessToken')
+        const UpdateTokenSpy = jest.spyOn(eventOptions, 'onTokenRefresh')
+        const synchronizeRefreshAccessTokenSpy = jest.spyOn(eventOptions, 'synchronizeRefreshAccessToken')
+        const res = await destinationTest.onBatch(testEvents, testSettings, eventOptions)
+        expect(res).toEqual([
+          {
+            multistatus: [
+              {
+                body: {},
+                sent: {
+                  advertiserId: '123456789'
+                },
+                status: 200
+              },
+              {
+                body: {},
+                sent: {
+                  advertiserId: '987654321'
+                },
+                status: 200
+              }
+            ]
+          }
+        ])
+        expect(refreshTokenSpy).toHaveBeenCalledTimes(1)
+        expect(UpdateTokenSpy).toHaveBeenCalledTimes(1)
+        expect(synchronizeRefreshAccessTokenSpy).toHaveBeenCalledTimes(1)
+      })
+
+      test('should not refresh access-token in case of any non 401 error', async () => {
+        const destinationTest = new Destination(destinationOAuth3)
+        const testEvents: SegmentEvent[] = [
+          {
+            properties: { a: 'foo', advertiserId: WRONG_ADVERTISER_ID },
+            userId: '3456fff',
+            type: 'track'
+          }
+        ]
+        const testSettings = {
+          apiSecret: 'test_key',
+          subscription: {
+            subscribe: 'type = "track"',
+            partnerAction: 'customEvent',
+            mapping: {
+              name: 'fancy_event123',
+              advertiserId: { '@path': '$.properties.advertiserId' }
+            }
+          },
+          oauth: {
+            access_token: 'valid-access-token',
+            refresh_token: 'refresh-token'
+          }
+        }
+        const eventOptions = {
+          onTokenRefresh: async (_tokens: RefreshAccessTokenResult) => {
+            jest.fn(() => Promise.resolve())
+          },
+          synchronizeRefreshAccessToken: async () => {
+            jest.fn(() => Promise.resolve())
+          }
+        }
+
+        const refreshTokenSpy = jest.spyOn(authentication, 'refreshAccessToken')
+        const UpdateTokenSpy = jest.spyOn(eventOptions, 'onTokenRefresh')
+        const synchronizeRefreshAccessTokenSpy = jest.spyOn(eventOptions, 'synchronizeRefreshAccessToken')
+        await expect(destinationTest.onBatch(testEvents, testSettings)).rejects.toThrowError()
+        expect(refreshTokenSpy).toHaveBeenCalledTimes(0)
+        expect(UpdateTokenSpy).toHaveBeenCalledTimes(0)
+        expect(synchronizeRefreshAccessTokenSpy).toHaveBeenCalledTimes(0)
+      })
+      test('should not refresh access-token if token is already valid', async () => {
+        const destinationTest = new Destination(destinationOAuth3)
+        const testEvents: SegmentEvent[] = [
+          {
+            properties: { a: 'foo', advertiserId: 123456789 },
+            userId: '3456fff',
+            type: 'track'
+          },
+          {
+            properties: { a: 'foo', advertiserId: 987654321 },
+            userId: '3456fff',
+            type: 'track'
+          }
+        ]
+        const testSettings = {
+          apiSecret: 'test_key',
+          subscription: {
+            subscribe: 'type = "track"',
+            partnerAction: 'customEvent',
+            mapping: {
+              name: 'fancy_event123',
+              advertiserId: { '@path': '$.properties.advertiserId' }
+            }
+          },
+          oauth: {
+            access_token: 'valid-access-token',
+            refresh_token: 'refresh-token'
+          }
+        }
+        const spy = jest.spyOn(authentication, 'refreshAccessToken')
+        const res = await destinationTest.onBatch(testEvents, testSettings)
+        expect(res).toEqual([
+          {
+            multistatus: [
+              {
+                body: {},
+                sent: {
+                  advertiserId: '123456789'
+                },
+                status: 200
+              },
+              {
+                body: {},
+                sent: {
+                  advertiserId: '987654321'
+                },
+                status: 200
+              }
+            ]
+          }
+        ])
+        expect(spy).toHaveBeenCalledTimes(0)
+      })
+    })
+    describe('createAudience', () => {
+      test('Refreshes the access-token in case of Unauthorized(401)', async () => {
+        const createAudienceInput = {
+          audienceName: 'Test Audience',
+          settings: {
+            oauth: {
+              clientId: 'valid-client-id',
+              clientSecret: 'valid-client-secret',
+              access_token: 'invalid-access-token',
+              refresh_token: 'refresh-token',
+              token_type: 'bearer'
+            }
+          },
+          audienceSettings: {
+            advertiserId: '12334745462532'
+          }
+        }
+        const destinationTest = new Destination(audienceDestination)
+        const spy = jest.spyOn(authentication, 'refreshAccessToken')
+        const res = await destinationTest.createAudience(createAudienceInput)
+        expect(res).toEqual({ externalId: '123456789' })
+        expect(spy).toHaveBeenCalledTimes(1)
+      })
+
+      test('should not refresh access-token in case of any non 401 error', async () => {
+        const createAudienceInput = {
+          audienceName: 'Test Audience',
+          settings: {
+            oauth: {
+              clientId: 'valid-client-id',
+              clientSecret: 'valid-client-secret',
+              access_token: 'access-token',
+              refresh_token: 'refresh-token',
+              token_type: 'bearer'
+            }
+          },
+          audienceSettings: {}
+        }
+        const destinationTest = new Destination(audienceDestination)
+        const spy = jest.spyOn(authentication, 'refreshAccessToken')
+        await expect(destinationTest.createAudience(createAudienceInput)).rejects.toThrowError()
+        expect(spy).not.toHaveBeenCalled()
+      })
+
+      test('should not refresh access-token if token is already valid', async () => {
+        const createAudienceInput = {
+          audienceName: 'Test Audience',
+          settings: {
+            oauth: {
+              clientId: 'valid-client-id',
+              clientSecret: 'valid-client-secret',
+              access_token: 'valid-access-token',
+              refresh_token: 'refresh-token',
+              token_type: 'bearer'
+            }
+          },
+          audienceSettings: {
+            advertiserId: '12334745462532'
+          }
+        }
+
+        const destinationTest = new Destination(audienceDestination)
+        const spy = jest.spyOn(authentication, 'refreshAccessToken')
+        const res = await destinationTest.createAudience(createAudienceInput)
+        expect(res).toEqual({ externalId: '123456789' })
+        expect(spy).not.toHaveBeenCalled()
+      })
+
+      test('should not refresh the access-token for non-Oauth authentication scheme', async () => {
+        const createAudienceInput = {
+          audienceName: 'Test Audience',
+          settings: {
+            oauth: {
+              clientId: 'invalid_client_id',
+              clientSecret: 'valid-client-secret'
+            }
+          },
+          audienceSettings: {
+            advertiserId: '12334745462532'
+          }
+        }
+        // Non-Oauth authentication scheme
+        audienceDestination.authentication = {
+          scheme: 'custom',
+          fields: {}
+        }
+        const destinationTest = new Destination(audienceDestination)
+        const spy = jest.spyOn(authentication, 'refreshAccessToken')
+        await expect(destinationTest.createAudience(createAudienceInput)).rejects.toThrowError()
+        expect(spy).not.toHaveBeenCalled()
+      })
+
+      test('Validate Schema | CPM Cents must be a number but it was a string', async () => {
+        const createAudienceInput = {
+          audienceName: 'Test Audience',
+          settings: {
+            oauth: {
+              clientId: 'valid-client-id',
+              clientSecret: 'valid-client-secret',
+              access_token: 'invalid-access-token',
+              refresh_token: 'refresh-token',
+              token_type: 'bearer'
+            }
+          },
+          audienceSettings: {
+            advertiserId: '12334745462532',
+            cpmCents: 'cpm_in_string'
+          }
+        }
+        const destinationTest = new Destination(audienceDestination)
+        await expect(destinationTest.createAudience(createAudienceInput)).rejects.toThrowError(
+          'CPM Cents must be a number but it was a string.'
+        )
+      })
+    })
+    describe('getAudience', () => {
+      test('Refreshes the access-token in case of Unauthorized(401)', async () => {
+        const getAudienceInput = {
+          externalId: '366170701270726115',
+          settings: {
+            oauth: {
+              clientId: 'valid-client-id',
+              clientSecret: 'valid-client-secret',
+              access_token: 'invalid-access-token',
+              refresh_token: 'refresh-token',
+              token_type: 'bearer'
+            }
+          }
+        }
+        audienceDestination.authentication = authentication
+        const destinationTest = new Destination(audienceDestination)
+        const spy = jest.spyOn(authentication, 'refreshAccessToken')
+        const res = await destinationTest.getAudience(getAudienceInput)
+        expect(res).toEqual({ externalId: '366170701270726115' })
+        expect(spy).toHaveBeenCalledTimes(1)
+      })
+
+      test('should not refresh access-token in case of any non 401 error', async () => {
+        const getAudienceInput = {
+          externalId: WRONG_AUDIENCE_ID,
+          settings: {
+            oauth: {
+              clientId: 'valid-client-id',
+              clientSecret: 'valid-client-secret',
+              access_token: 'valid-access-token',
+              refresh_token: 'refresh-token',
+              token_type: 'bearer'
+            }
+          }
+        }
+        const destinationTest = new Destination(audienceDestination)
+        const spy = jest.spyOn(authentication, 'refreshAccessToken')
+        await expect(destinationTest.getAudience(getAudienceInput)).rejects.toThrowError()
+        expect(spy).not.toHaveBeenCalled()
+      })
+
+      test('should not refresh access-token if token is already valid', async () => {
+        const getAudienceInput = {
+          externalId: '366170701270726115',
+          settings: {
+            oauth: {
+              clientId: 'valid-client-id',
+              clientSecret: 'valid-client-secret',
+              access_token: 'valid-access-token',
+              refresh_token: 'refresh-token',
+              token_type: 'bearer'
+            }
+          }
+        }
+        const destinationTest = new Destination(audienceDestination)
+        const spy = jest.spyOn(authentication, 'refreshAccessToken')
+        const res = await destinationTest.getAudience(getAudienceInput)
+        expect(res).toEqual({ externalId: '366170701270726115' })
+        expect(spy).not.toHaveBeenCalled()
+      })
+
+      test('should not refresh the access-token for non-Oauth authentication scheme', async () => {
+        const getAudienceInput = {
+          externalId: '366170701270726115',
+          settings: {
+            oauth: {
+              clientId: 'invalid_client_id',
+              clientSecret: 'valid-client-secret'
+            }
+          }
+        }
+
+        // Non-Oauth authentication scheme
+        audienceDestination.authentication = {
+          scheme: 'custom',
+          fields: {}
+        }
+        const destinationTest = new Destination(audienceDestination)
+        const spy = jest.spyOn(authentication, 'refreshAccessToken')
+        await expect(destinationTest.getAudience(getAudienceInput)).rejects.toThrowError()
+        expect(spy).not.toHaveBeenCalled()
+      })
+    })
+  })
+
+  describe('multiStatus response', () => {
+    test('should report invalid events filtered out by actions framework', async () => {
+      const multiStatusDestination = new Destination(multiStatusCompatibleDestination)
+
+      const receivedAt = '2024-08-03T17:40:04.055Z'
+
+      const events: SegmentEvent[] = [
+        {
+          // Empty Object
+        } as unknown as SegmentEvent,
+        {
+          // Malformed Event
+          unknown: 'some-value'
+        } as unknown as SegmentEvent,
+        {
+          // Missing required fields
+          event: 'Add to Cart',
+          type: 'track',
+          properties: {},
+          receivedAt
+        },
+        {
+          // Valid Event
+          event: 'Add to Cart',
+          type: 'track',
+          properties: {
+            email: 'user.one@example.com'
+          },
+          receivedAt
+        },
+        {
+          // Valid Event with emulated rejection
+          event: 'Add to Cart',
+          type: 'track',
+          properties: {
+            phone: '1234567890'
+          },
+          receivedAt
+        }
+      ]
+
+      const settings = {
+        apiSecret: 'test_key',
+        subscription: {
+          subscribe: 'type = "track" and event != "Order Completed"',
+          partnerAction: 'trackEvent',
+          mapping: {
+            name: { '@path': '$.event' },
+            email: { '@path': '$.properties.email' },
+            phone: { '@path': '$.properties.phone' }
+          }
+        }
+      }
+
+      const eventOptions = {
+        features: {},
+        statsContext: {} as StatsContext,
+        logger: { name: 'test-integration', level: 'debug' } as Logger,
+        transactionContext: {
+          transaction: {},
+          setTransaction: (key: string, value: string) => ({ [key]: value })
+        } as TransactionContext,
+        stateContext: {
+          getRequestContext: (_key: string, _cb?: (res?: string) => any): any => {},
+          setResponseContext: (
+            _key: string,
+            _value: string,
+            _ttl: { hour?: number; minute?: number; second?: number }
+          ): void => {}
+        } as StateContext
+      }
+
+      const res = await multiStatusDestination.onBatch(events, settings, eventOptions)
+
+      expect(res).toMatchInlineSnapshot(`
+        Array [
+          Object {
+            "multistatus": Array [
+              Object {
+                "errormessage": "Payload is either invalid or does not match the subscription",
+                "errorreporter": "INTEGRATIONS",
+                "errortype": "PAYLOAD_VALIDATION_FAILED",
+                "status": 400,
+              },
+              Object {
+                "errormessage": "Payload is either invalid or does not match the subscription",
+                "errorreporter": "INTEGRATIONS",
+                "errortype": "PAYLOAD_VALIDATION_FAILED",
+                "status": 400,
+              },
+              Object {
+                "errormessage": "Email is required",
+                "errorreporter": "INTEGRATIONS",
+                "errortype": "PAYLOAD_VALIDATION_FAILED",
+                "status": 400,
+              },
+              Object {
+                "body": Object {},
+                "sent": Object {},
+                "status": 200,
+              },
+              Object {
+                "body": Object {
+                  "events_processed": 0,
+                  "message": "Phone number validation failed",
+                },
+                "errormessage": "Phone number validation failed",
+                "errorreporter": "DESTINATION",
+                "errortype": "BAD_REQUEST",
+                "sent": Object {
+                  "name": "Add to Cart",
+                  "phone": "1234567890",
+                },
+                "status": 400,
+              },
+            ],
+          },
+        ]
+      `)
+    })
+    test('should refresh access token and retry events in case multistatus response contains 401 for oauth2 destinations', async () => {
+      const mockRefreshToken = jest.fn().mockReturnValue({
+        accessToken: 'new-access-token'
+      })
+      const mockOnTokenRefresh = jest.fn().mockReturnValue(Promise.resolve())
+      const destinationWithOAuth = {
+        ...multiStatusCompatibleDestination,
+        authentication: {
+          scheme: 'oauth2',
+          fields: {},
+          refreshAccessToken: mockRefreshToken
+        } as OAuth2Authentication<any>
+      }
+      const multiStatusDestination = new Destination(destinationWithOAuth)
+
+      const receivedAt = '2024-08-03T17:40:04.055Z'
+
+      const events: SegmentEvent[] = [
+        {
+          event: 'Add to Cart',
+          type: 'track',
+          properties: {
+            email: 'user.one@example.com'
+          },
+          receivedAt
+        },
+        {
+          // Missing required fields
+          event: 'Add to Cart',
+          type: 'track',
+          properties: {},
+          receivedAt
+        }
+      ]
+
+      const settings = {
+        apiSecret: 'test_key',
+        oauth: {
+          access_token: 'OldToken'
+        },
+        subscription: {
+          subscribe: 'type = "track" and event != "Order Completed"',
+          partnerAction: 'trackEvent',
+          mapping: {
+            name: { '@path': '$.event' },
+            email: { '@path': '$.properties.email' },
+            phone: { '@path': '$.properties.phone' }
+          }
+        }
+      }
+
+      multiStatusDestination.refreshAccessToken = mockRefreshToken
+
+      const response = await multiStatusDestination.onBatch(events, settings, {
+        onTokenRefresh: mockOnTokenRefresh
+      })
+      // assert that the refresh token was called once
+      expect(mockRefreshToken).toHaveBeenCalledTimes(1)
+      expect(mockOnTokenRefresh).toHaveBeenCalledWith(expect.objectContaining({ accessToken: 'new-access-token' }))
+      expect(response).toMatchInlineSnapshot(`
+        Array [
+          Object {
+            "multistatus": Array [
+              Object {
+                "body": Object {},
+                "sent": Object {},
+                "status": 200,
+              },
+              Object {
+                "errormessage": "Email is required",
+                "errorreporter": "INTEGRATIONS",
+                "errortype": "PAYLOAD_VALIDATION_FAILED",
+                "status": 400,
+              },
+            ],
+          },
+        ]
+      `)
+    })
+    test('should refresh access token and retry events in case multistatus response contains 401 for oauth-managed destinations', async () => {
+      const mockRefreshToken = jest.fn().mockReturnValue({
+        accessToken: 'new-access-token'
+      })
+      const mockOnTokenRefresh = jest.fn().mockReturnValue(Promise.resolve())
+      const destinationWithOAuth = {
+        ...multiStatusCompatibleDestination,
+        authentication: {
+          scheme: 'oauth-managed',
+          fields: {},
+          refreshAccessToken: mockRefreshToken
+        } as OAuthManagedAuthentication<any>
+      }
+      const multiStatusDestination = new Destination(destinationWithOAuth)
+
+      const receivedAt = '2024-08-03T17:40:04.055Z'
+
+      const events: SegmentEvent[] = [
+        {
+          event: 'Add to Cart',
+          type: 'track',
+          properties: {
+            email: 'user.one@example.com'
+          },
+          receivedAt
+        },
+        {
+          // Missing required fields
+          event: 'Add to Cart',
+          type: 'track',
+          properties: {},
+          receivedAt
+        }
+      ]
+
+      const settings = {
+        apiSecret: 'test_key',
+        oauth: {
+          access_token: 'OldToken'
+        },
+        subscription: {
+          subscribe: 'type = "track" and event != "Order Completed"',
+          partnerAction: 'trackEvent',
+          mapping: {
+            name: { '@path': '$.event' },
+            email: { '@path': '$.properties.email' },
+            phone: { '@path': '$.properties.phone' }
+          }
+        }
+      }
+
+      multiStatusDestination.refreshAccessToken = mockRefreshToken
+
+      const response = await multiStatusDestination.onBatch(events, settings, {
+        onTokenRefresh: mockOnTokenRefresh
+      })
+      // assert that the refresh token was called once
+      expect(mockRefreshToken).toHaveBeenCalledTimes(1)
+      // assert that the onTokenRefresh was called once
+      expect(mockOnTokenRefresh).toHaveBeenCalledWith(expect.objectContaining({ accessToken: 'new-access-token' }))
+      expect(response).toMatchInlineSnapshot(`
+        Array [
+          Object {
+            "multistatus": Array [
+              Object {
+                "body": Object {},
+                "sent": Object {},
+                "status": 200,
+              },
+              Object {
+                "errormessage": "Email is required",
+                "errorreporter": "INTEGRATIONS",
+                "errortype": "PAYLOAD_VALIDATION_FAILED",
+                "status": 400,
+              },
+            ],
+          },
+        ]
+      `)
+    })
+    test('should not retry events in case multistatus response doesnot contain 401 errors for oauth destinations', async () => {
+      const mockRefreshToken = jest.fn().mockReturnValue({
+        accessToken: 'new-access-token'
+      })
+      const destinationWithOAuth = {
+        ...multiStatusCompatibleDestination,
+        authentication: {
+          scheme: 'oauth-managed',
+          fields: {},
+          refreshAccessToken: mockRefreshToken
+        } as OAuthManagedAuthentication<any>
+      }
+      const multiStatusDestination = new Destination(destinationWithOAuth)
+
+      const receivedAt = '2024-08-03T17:40:04.055Z'
+
+      const events: SegmentEvent[] = [
+        {
+          event: 'Add to Cart',
+          type: 'track',
+          properties: {
+            email: 'user.one@example.com'
+          },
+          receivedAt
+        },
+        {
+          // Missing required fields
+          event: 'Add to Cart',
+          type: 'track',
+          properties: {},
+          receivedAt
+        }
+      ]
+
+      const settings = {
+        apiSecret: 'test_key',
+        oauth: {},
+        subscription: {
+          subscribe: 'type = "track" and event != "Order Completed"',
+          partnerAction: 'trackEvent',
+          mapping: {
+            name: { '@path': '$.event' },
+            email: { '@path': '$.properties.email' },
+            phone: { '@path': '$.properties.phone' }
+          }
+        }
+      }
+
+      const response = await multiStatusDestination.onBatch(events, settings, {})
+      expect(mockRefreshToken).not.toHaveBeenCalled()
+      expect(response).toMatchInlineSnapshot(`
+        Array [
+          Object {
+            "multistatus": Array [
+              Object {
+                "body": Object {},
+                "sent": Object {},
+                "status": 200,
+              },
+              Object {
+                "errormessage": "Email is required",
+                "errorreporter": "INTEGRATIONS",
+                "errortype": "PAYLOAD_VALIDATION_FAILED",
+                "status": 400,
+              },
+            ],
+          },
+        ]
+      `)
+    })
+    test('should not retry events more than max retry attempts for 401 errors', async () => {
+      const mockRefreshToken = jest.fn().mockReturnValue({
+        accessToken: 'OldToken'
+      })
+      const destinationWithOAuth = {
+        ...multiStatusCompatibleDestination,
+        authentication: {
+          scheme: 'oauth-managed',
+          fields: {},
+          refreshAccessToken: mockRefreshToken
+        } as OAuthManagedAuthentication<any>
+      }
+      const multiStatusDestination = new Destination(destinationWithOAuth)
+
+      const receivedAt = '2024-08-03T17:40:04.055Z'
+
+      const events: SegmentEvent[] = [
+        {
+          event: 'Add to Cart',
+          type: 'track',
+          properties: {
+            email: 'user.one@example.com'
+          },
+          receivedAt
+        },
+        {
+          // Missing required fields
+          event: 'Add to Cart',
+          type: 'track',
+          properties: {},
+          receivedAt
+        }
+      ]
+
+      const settings = {
+        apiSecret: 'test_key',
+        oauth: {
+          access_token: 'OldToken'
+        },
+        subscription: {
+          subscribe: 'type = "track" and event != "Order Completed"',
+          partnerAction: 'trackEvent',
+          mapping: {
+            name: { '@path': '$.event' },
+            email: { '@path': '$.properties.email' },
+            phone: { '@path': '$.properties.phone' }
+          }
+        }
+      }
+
+      const response = await multiStatusDestination.onBatch(events, settings, {})
+      // Default retry attempts is 2
+      expect(mockRefreshToken).toHaveBeenCalledTimes(2)
+      expect(response).toMatchInlineSnapshot(`
+        Array [
+          Object {
+            "multistatus": Array [
+              Object {
+                "body": Object {
+                  "events_processed": 0,
+                  "message": "Invalid Auth",
+                },
+                "errormessage": "Invalid Auth",
+                "errorreporter": "DESTINATION",
+                "errortype": "INVALID_AUTHENTICATION",
+                "sent": Object {
+                  "email": "user.one@example.com",
+                  "name": "Add to Cart",
+                },
+                "status": 401,
+              },
+              Object {
+                "body": Object {
+                  "events_processed": 0,
+                  "message": "Invalid Auth",
+                },
+                "errormessage": "Invalid Auth",
+                "errorreporter": "DESTINATION",
+                "errortype": "INVALID_AUTHENTICATION",
+                "sent": Object {
+                  "name": "Add to Cart",
+                },
+                "status": 401,
+              },
+            ],
+          },
+        ]
+      `)
+    })
+  })
+
+  describe('async actions', () => {
+    const mockPerformBatch = jest.fn()
+    const mockPerformPoll = jest.fn()
+
+    const asyncActionDefinition: AsyncActionDefinition<JSONObject, { email: string }> = {
+      title: 'Async Track Event',
+      description: 'Async track events for batch processing',
+      defaultSubscription: 'type = "track"',
+      fields: {
+        email: {
+          label: 'Email',
+          description: 'The user email',
+          type: 'string',
+          required: true
+        }
+      },
+      performBatch: mockPerformBatch,
+      performPoll: mockPerformPoll
+    }
+
+    const destinationWithAsyncAction: DestinationDefinition<JSONObject> = {
+      name: 'Async Destination',
+      mode: 'cloud',
+      authentication: {
+        scheme: 'custom',
+        fields: {
+          apiKey: {
+            label: 'API Key',
+            description: 'API Key',
+            type: 'string',
+            required: true
+          }
+        }
+      },
+      actions: {},
+      asyncActions: {
+        asyncTrackEvent: asyncActionDefinition
+      }
+    }
+
+    beforeEach(() => {
+      jest.clearAllMocks()
+    })
+
+    describe('destination initialization', () => {
+      test('should initialize async actions when defined in destination definition', () => {
+        const destinationTest = new Destination(destinationWithAsyncAction)
+        expect(destinationTest.asyncActions).toBeDefined()
+        expect(destinationTest.asyncActions['asyncTrackEvent']).toBeDefined()
+      })
+
+      test('should have empty async actions when not defined in destination definition', () => {
+        const destinationTest = new Destination(destinationCustomAuth)
+        expect(destinationTest.asyncActions).toBeDefined()
+        expect(Object.keys(destinationTest.asyncActions).length).toBe(0)
+      })
+    })
+
+    describe('executeAsyncBatch', () => {
+      test('should throw error when async action is not found', async () => {
+        const destinationTest = new Destination(destinationWithAsyncAction)
+        const events: SegmentEvent[] = [
+          {
+            type: 'track',
+            event: 'Test Event',
+            properties: { email: 'test@example.com' }
+          }
+        ]
+
+        await expect(
+          destinationTest.executeAsyncBatch('nonExistentAction', {
+            events,
+            mapping: { email: { '@path': '$.properties.email' } },
+            settings: { apiKey: 'test-key' }
+          })
+        ).rejects.toThrow('Async action nonExistentAction not found.')
+      })
+
+      test('should execute async batch and return jobId with multiStatusResponse', async () => {
+        const multiStatusResponse = new MultiStatusResponse()
+        multiStatusResponse.pushSuccessResponse({ status: 200, body: {}, sent: {} })
+        multiStatusResponse.pushSuccessResponse({ status: 200, body: {}, sent: {} })
+
+        mockPerformBatch.mockResolvedValue({
+          jobId: 'test-job-123',
+          multiStatusResponse
+        } as AsyncBatchResponse)
+
+        const destinationTest = new Destination(destinationWithAsyncAction)
+        const events: SegmentEvent[] = [
+          { type: 'track', event: 'Test Event 1', properties: { email: 'user1@example.com' } },
+          { type: 'track', event: 'Test Event 2', properties: { email: 'user2@example.com' } }
+        ]
+
+        const result = await destinationTest.executeAsyncBatch('asyncTrackEvent', {
+          events,
+          mapping: { email: { '@path': '$.properties.email' } },
+          settings: { apiKey: 'test-key' }
+        })
+
+        expect(result.jobId).toBe('test-job-123')
+        expect(result.multiStatusResponse.length()).toBe(2)
+        expect(result.multiStatusResponse.getResponseAtIndex(0).value().status).toBe(200)
+        expect(result.multiStatusResponse.getResponseAtIndex(1).value().status).toBe(200)
+        expect(mockPerformBatch).toHaveBeenCalledTimes(1)
+      })
+
+      test('should filter out invalid payloads and include them in multiStatusResponse', async () => {
+        const multiStatusResponse = new MultiStatusResponse()
+        multiStatusResponse.pushSuccessResponse({ status: 200, body: {}, sent: {} })
+
+        mockPerformBatch.mockResolvedValue({
+          jobId: 'test-job-456',
+          multiStatusResponse
+        } as AsyncBatchResponse)
+
+        const destinationTest = new Destination(destinationWithAsyncAction)
+        const events: SegmentEvent[] = [
+          { type: 'track', event: 'Test Event 1', properties: { email: 'valid@example.com' } },
+          { type: 'track', event: 'Test Event 2', properties: {} } // Missing required email field
+        ]
+
+        const result = await destinationTest.executeAsyncBatch('asyncTrackEvent', {
+          events,
+          mapping: { email: { '@path': '$.properties.email' } },
+          settings: { apiKey: 'test-key' }
+        })
+
+        expect(result.jobId).toBe('test-job-456')
+        expect(result.multiStatusResponse.length()).toBe(2)
+        expect(result.multiStatusResponse.getResponseAtIndex(0).value().status).toBe(200)
+        expect(result.multiStatusResponse.getResponseAtIndex(1).value().status).toBe(400)
+        const errResponse1 = result.multiStatusResponse.getResponseAtIndex(1)
+        expect(errResponse1 instanceof ActionDestinationErrorResponse && errResponse1.value().errortype).toBe(
+          ErrorCodes.PAYLOAD_VALIDATION_FAILED
+        )
+      })
+
+      test('should return empty response when all payloads are invalid', async () => {
+        const destinationTest = new Destination(destinationWithAsyncAction)
+        const events: SegmentEvent[] = [
+          { type: 'track', event: 'Test Event 1', properties: {} }, // Missing required email field
+          { type: 'track', event: 'Test Event 2', properties: {} } // Missing required email field
+        ]
+
+        const result = await destinationTest.executeAsyncBatch('asyncTrackEvent', {
+          events,
+          mapping: { email: { '@path': '$.properties.email' } },
+          settings: { apiKey: 'test-key' }
+        })
+
+        expect(result.jobId).toBeUndefined()
+        expect(result.multiStatusResponse.length()).toBe(2)
+        expect(result.multiStatusResponse.getResponseAtIndex(0).value().status).toBe(400)
+        expect(result.multiStatusResponse.getResponseAtIndex(1).value().status).toBe(400)
+        expect(mockPerformBatch).not.toHaveBeenCalled()
+      })
+    })
+
+    describe('executeAsyncPoll', () => {
+      test('should throw error when async action is not found', async () => {
+        const destinationTest = new Destination(destinationWithAsyncAction)
+        const pollPayload: PollPayload = {
+          jobId: 'test-job-123',
+          uploadCount: 1
+        }
+
+        await expect(
+          destinationTest.executeAsyncPoll('nonExistentAction', {
+            pollPayload,
+            settings: { apiKey: 'test-key' }
+          })
+        ).rejects.toThrow('Async action nonExistentAction not found or does not support polling.')
+      })
+
+      test('should execute poll and return status IN_PROGRESS', async () => {
+        const pollResponse: PollResponse = {
+          jobId: 'test-job-123',
+          status: 200,
+          jobStatus: 'IN_PROGRESS'
+        }
+
+        mockPerformPoll.mockResolvedValue(pollResponse)
+
+        const destinationTest = new Destination(destinationWithAsyncAction)
+        const pollPayload: PollPayload = {
+          jobId: 'test-job-123',
+          uploadCount: 100
+        }
+
+        const result = await destinationTest.executeAsyncPoll('asyncTrackEvent', {
+          pollPayload,
+          settings: { apiKey: 'test-key' }
+        })
+
+        expect(result.jobId).toBe('test-job-123')
+        expect(result.jobStatus).toBe('IN_PROGRESS')
+        expect(result.status).toBe(200)
+        expect(mockPerformPoll).toHaveBeenCalledTimes(1)
+      })
+
+      test('should execute poll and return status SUCCEEDED with a multi-status response', async () => {
+        const multiStatusResponse = new MultiStatusResponse()
+        multiStatusResponse.pushSuccessResponse({ status: 200, body: {}, sent: {} })
+        multiStatusResponse.pushSuccessResponse({ status: 200, body: {}, sent: {} })
+
+        const pollResponse: PollResponse = {
+          jobId: 'test-job-456',
+          status: 200,
+          jobStatus: 'SUCCEEDED',
+          multiStatusResponse
+        }
+
+        mockPerformPoll.mockResolvedValue(pollResponse)
+
+        const destinationTest = new Destination(destinationWithAsyncAction)
+        const pollPayload: PollPayload = {
+          jobId: 'test-job-456',
+          uploadCount: 2
+        }
+
+        const result = await destinationTest.executeAsyncPoll('asyncTrackEvent', {
+          pollPayload,
+          settings: { apiKey: 'test-key' }
+        })
+
+        expect(result.jobId).toBe('test-job-456')
+        expect(result.jobStatus).toBe('SUCCEEDED')
+        expect(result.status).toBe(200)
+        expect(result.multiStatusResponse).toBeDefined()
+        expect(result.multiStatusResponse?.length()).toBe(2)
+      })
+
+      test('should execute poll and return status FAILED', async () => {
+        const multiStatusResponse = new MultiStatusResponse()
+        multiStatusResponse.pushErrorResponse({ status: 500, errormessage: 'Destination API returned an error' })
+
+        const pollResponse: PollResponse = {
+          jobId: 'test-job-789',
+          status: 500,
+          jobStatus: 'FAILED',
+          multiStatusResponse
+        }
+
+        mockPerformPoll.mockResolvedValue(pollResponse)
+
+        const destinationTest = new Destination(destinationWithAsyncAction)
+        const pollPayload: PollPayload = {
+          jobId: 'test-job-789',
+          uploadCount: 10
+        }
+
+        const result = await destinationTest.executeAsyncPoll('asyncTrackEvent', {
+          pollPayload,
+          settings: { apiKey: 'test-key' }
+        })
+
+        expect(result.jobId).toBe('test-job-789')
+        expect(result.jobStatus).toBe('FAILED')
+        expect(result.status).toBe(500)
+        expect(result.multiStatusResponse).toBeDefined()
+        const errResponse = result.multiStatusResponse?.getResponseAtIndex(0)
+        expect(errResponse?.value().status).toBe(500)
+        expect(errResponse instanceof ActionDestinationErrorResponse && errResponse.value().errormessage).toBe(
+          'Destination API returned an error'
+        )
+      })
+
+      test('should execute poll and return status RETRYABLE_ERROR', async () => {
+        const pollResponse: PollResponse = {
+          jobId: 'test-job-retry',
+          status: 500,
+          jobStatus: 'RETRYABLE_ERROR'
+        }
+
+        mockPerformPoll.mockResolvedValue(pollResponse)
+
+        const destinationTest = new Destination(destinationWithAsyncAction)
+        const pollPayload: PollPayload = {
+          jobId: 'test-job-retry',
+          uploadCount: 10
+        }
+
+        const result = await destinationTest.executeAsyncPoll('asyncTrackEvent', {
+          pollPayload,
+          settings: { apiKey: 'test-key' }
+        })
+
+        expect(result.jobId).toBe('test-job-retry')
+        expect(result.jobStatus).toBe('RETRYABLE_ERROR')
+        expect(result.status).toBe(500)
+      })
+
+      test('should pass auth data extracted from settings to poll', async () => {
+        const pollResponse: PollResponse = {
+          jobId: 'test-job-auth',
+          status: 200,
+          jobStatus: 'SUCCEEDED'
+        }
+
+        mockPerformPoll.mockResolvedValue(pollResponse)
+
+        const destinationTest = new Destination(destinationWithAsyncAction)
+        const pollPayload: PollPayload = {
+          jobId: 'test-job-auth',
+          uploadCount: 1
+        }
+
+        await destinationTest.executeAsyncPoll('asyncTrackEvent', {
+          pollPayload,
+          settings: {
+            apiKey: 'test-key',
+            oauth: {
+              access_token: 'test-access-token',
+              refresh_token: 'test-refresh-token'
+            }
+          } as JSONObject
+        })
+
+        expect(mockPerformPoll).toHaveBeenCalledTimes(1)
+        const callArgs = mockPerformPoll.mock.calls[0][1]
+        expect(callArgs.auth).toBeDefined()
+        expect(callArgs.auth?.accessToken).toBe('test-access-token')
+      })
     })
   })
 })

@@ -1,0 +1,35 @@
+import { ActionDefinition, IntegrationError } from '@segment/actions-core'
+import type { Settings } from '../generated-types'
+import type { Payload } from './generated-types'
+import { asyncUpsertRowsV2 } from '../sfmc-operations'
+import { fields, dynamicFields, hooks } from './fields'
+
+const action: ActionDefinition<Settings, Payload> = {
+  title: 'Send Event asynchronously to Data Extension',
+  description: `Upsert event records asynchronously as rows into a data extension in Salesforce Marketing Cloud.`,
+  fields,
+  dynamicFields,
+  hooks,
+  perform: async (request, { settings, payload, hookOutputs }) => {
+    const dataExtensionId: string =
+      hookOutputs?.onMappingSave?.outputs?.id || hookOutputs?.retlOnMappingSave?.outputs?.id
+
+    if (!dataExtensionId) {
+      throw new IntegrationError('No Data Extension Connected', 'INVALID_CONFIGURATION', 400)
+    }
+
+    return asyncUpsertRowsV2(request, settings.subdomain, [payload], dataExtensionId)
+  },
+
+  performBatch: async (request, { settings, payload, hookOutputs }) => {
+    const dataExtensionId: string =
+      hookOutputs?.onMappingSave?.outputs?.id || hookOutputs?.retlOnMappingSave?.outputs?.id
+
+    if (!dataExtensionId) {
+      throw new IntegrationError('No Data Extension Connected', 'INVALID_CONFIGURATION', 400)
+    }
+    return asyncUpsertRowsV2(request, settings.subdomain, payload, dataExtensionId)
+  }
+}
+
+export default action

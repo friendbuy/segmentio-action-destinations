@@ -5,16 +5,28 @@ import type { Settings } from './generated-types'
 
 import identifyUser from './identifyUser'
 import groupIdentifyUser from './groupIdentifyUser'
+import incrementProperties from './incrementProperties'
 
 import alias from './alias'
+import { ApiRegions, StrictMode } from './common/utils'
+
+import trackPurchase from './trackPurchase'
 
 /** used in the quick setup */
 const presets: DestinationDefinition['presets'] = [
   {
     name: 'Track Calls',
-    subscribe: 'type = "track"',
+    subscribe: 'type = "track" and event != "Order Completed"',
     partnerAction: 'trackEvent',
-    mapping: defaultValues(trackEvent.fields)
+    mapping: defaultValues(trackEvent.fields),
+    type: 'automatic'
+  },
+  {
+    name: 'Order Completed Calls',
+    subscribe: 'type = "track" and event = "Order Completed"',
+    partnerAction: 'trackPurchase',
+    mapping: defaultValues(trackPurchase.fields),
+    type: 'automatic'
   },
   {
     name: 'Page Calls',
@@ -25,7 +37,8 @@ const presets: DestinationDefinition['presets'] = [
       event: {
         '@template': 'Viewed {{name}}'
       }
-    }
+    },
+    type: 'automatic'
   },
   {
     name: 'Screen Calls',
@@ -36,19 +49,22 @@ const presets: DestinationDefinition['presets'] = [
       event: {
         '@template': 'Viewed {{name}}'
       }
-    }
+    },
+    type: 'automatic'
   },
   {
     name: 'Identify Calls',
     subscribe: 'type = "identify"',
     partnerAction: 'identifyUser',
-    mapping: defaultValues(identifyUser.fields)
+    mapping: defaultValues(identifyUser.fields),
+    type: 'automatic'
   },
   {
     name: 'Group Calls',
     subscribe: 'type = "group"',
     partnerAction: 'groupIdentifyUser',
-    mapping: defaultValues(groupIdentifyUser.fields)
+    mapping: defaultValues(groupIdentifyUser.fields),
+    type: 'automatic'
   }
 ]
 
@@ -65,19 +81,39 @@ const destination: DestinationDefinition<Settings> = {
         type: 'string',
         required: true
       },
-      // TODO: maybe we should just require service account instead?
       apiSecret: {
         label: 'Secret Key',
         description: 'Mixpanel project secret.',
+        type: 'password',
+        required: false
+      },
+      apiRegion: {
+        label: 'Data Residency',
+        description:
+          'Learn about [EU data residency](https://docs.mixpanel.com/docs/privacy/eu-residency) and [India data residency](https://docs.mixpanel.com/docs/privacy/in-residency)',
         type: 'string',
-        required: true
+        choices: Object.values(ApiRegions).map((apiRegion) => ({ label: apiRegion, value: apiRegion })),
+        default: ApiRegions.US
+      },
+      sourceName: {
+        label: 'Source Name',
+        description:
+          "This value, if it's not blank, will be sent as segment_source_name to Mixpanel for every event/page/screen call.",
+        type: 'string'
+      },
+      strictMode: {
+        label: 'Strict Mode',
+        description:
+          "This value, if it's 1 (recommended), Mixpanel will validate the events you are trying to send and return errors per event that failed. Learn more about the Mixpanel [Import Events API](https://developer.mixpanel.com/reference/import-events)",
+        type: 'string',
+        choices: Object.values(StrictMode).map((strictMode) => ({ label: strictMode, value: strictMode })),
+        default: StrictMode.ON
       }
     },
     testAuthentication: (request, { settings }) => {
       return request(`https://mixpanel.com/api/app/validate-project-credentials/`, {
         method: 'post',
         body: JSON.stringify({
-          api_secret: settings.apiSecret,
           project_token: settings.projectToken
         })
       })
@@ -88,7 +124,9 @@ const destination: DestinationDefinition<Settings> = {
     trackEvent,
     identifyUser,
     groupIdentifyUser,
-    alias
+    alias,
+    trackPurchase,
+    incrementProperties
   }
 }
 

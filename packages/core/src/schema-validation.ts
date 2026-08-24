@@ -4,6 +4,7 @@ import addFormats from 'ajv-formats'
 import dayjs from 'dayjs'
 import type { JSONSchema4 } from 'json-schema'
 import { arrifyFields } from './arrify'
+import { StatsContext } from './destination-kit'
 
 // `addFormats` includes many standard formats we use like `uri`, `date`, `email`, etc.
 const ajv = addFormats(
@@ -41,6 +42,8 @@ ajv.addFormat('date-like', (data: string) => {
 interface ValidationOptions {
   schemaKey?: string
   throwIfInvalid?: boolean
+  statsContext?: StatsContext
+  exempt?: string[]
 }
 
 /**
@@ -48,8 +51,15 @@ interface ValidationOptions {
  * and caches the schema for subsequent validations when a key is provided
  */
 export function validateSchema(obj: unknown, schema: JSONSchema4, options?: ValidationOptions) {
-  const { schemaKey, throwIfInvalid = true } = options ?? {}
+  const { schemaKey, throwIfInvalid = true, statsContext, exempt = [] } = options ?? {}
   let validate: ValidateFunction
+  const exemptedFields: Record<string, unknown> = {}
+
+  // save exempted fields
+  const objCopy = { ...(obj as Record<string, unknown>) }
+  exempt.forEach((prop) => {
+    exemptedFields[prop] = objCopy[prop]
+  })
 
   if (schemaKey) {
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
@@ -62,7 +72,15 @@ export function validateSchema(obj: unknown, schema: JSONSchema4, options?: Vali
   arrifyFields(obj, schema)
   const isValid = validate(obj)
 
+  // add exempted fields back
+  exempt.forEach((prop) => {
+    if (objCopy[prop] !== undefined) {
+      ;(obj as Record<string, unknown>)[prop] = exemptedFields[prop]
+    }
+  })
+
   if (throwIfInvalid && !isValid && validate.errors) {
+    statsContext?.statsClient?.incr('ajv.discard', 1, statsContext.tags)
     throw new AggregateAjvError(validate.errors)
   }
 

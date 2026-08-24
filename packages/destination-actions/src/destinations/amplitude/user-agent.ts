@@ -5,9 +5,15 @@ interface ParsedUA {
   os_version?: string
   device_model?: string
   device_type?: string
+  device_manufacturer?: string
 }
 
-export function parseUserAgentProperties(userAgent?: string): ParsedUA {
+interface UserAgentData {
+  model?: string
+  platformVersion?: string
+}
+
+export function parseUserAgentProperties(userAgent?: string, userAgentData?: UserAgentData): ParsedUA {
   if (!userAgent) {
     return {}
   }
@@ -22,9 +28,10 @@ export function parseUserAgentProperties(userAgent?: string): ParsedUA {
   const browser = parser.getBrowser()
 
   return {
-    os_name: browser.name ?? os.name,
-    os_version: browser.major ?? os.version,
-    device_model: device.model ?? os.name,
+    os_name: os.name ?? browser.name,
+    os_version: userAgentData?.platformVersion ?? browser.major,
+    device_manufacturer: device.vendor,
+    device_model: userAgentData?.model ?? device.model ?? os.name,
     device_type: device.type
   }
 }

@@ -9,8 +9,10 @@ import { convertReferrerProperty } from '../referrer'
 import { mergeUserProperties } from '../merge-user-properties'
 import { parseUserAgentProperties } from '../user-agent'
 import { getEndpointByRegion } from '../regional-endpoints'
+import { formatSessionId } from '../convert-timestamp'
+import { userAgentData } from '../properties'
 
-export interface AmplitudeEvent extends Omit<Payload, 'products' | 'trackRevenuePerProduct' | 'time' | 'session_id'> {
+export interface AmplitudeEvent extends Omit<Payload, 'products' | 'time' | 'session_id'> {
   library?: string
   time?: number
   session_id?: number
@@ -20,47 +22,18 @@ export interface AmplitudeEvent extends Omit<Payload, 'products' | 'trackRevenue
 }
 
 const revenueKeys = ['revenue', 'price', 'productId', 'quantity', 'revenueType']
-
-interface EventRevenue {
-  revenue?: number
-  price?: number
-  productId?: string
-  quantity?: number
-  revenueType?: string
-}
-
-function getRevenueProperties(payload: EventRevenue): EventRevenue {
-  if (typeof payload.revenue !== 'number') {
-    return {}
-  }
-
-  return {
-    revenue: payload.revenue,
-    revenueType: payload.revenueType ?? 'Purchase',
-    quantity: typeof payload.quantity === 'number' ? Math.round(payload.quantity) : undefined,
-    price: payload.price,
-    productId: payload.productId
-  }
-}
-
 const action: ActionDefinition<Settings, Payload> = {
   title: 'Log Event',
   description: 'Send an event to Amplitude.',
   defaultSubscription: 'type = "track"',
   fields: {
-    trackRevenuePerProduct: {
-      label: 'Track Revenue Per Product',
-      description:
-        'When enabled, track revenue with each product within the event. When disabled, track total revenue once for the event.',
-      type: 'boolean',
-      default: false
-    },
     ...eventSchema,
     products: {
       label: 'Products',
       description: 'The list of products purchased.',
       type: 'object',
       multiple: true,
+      additionalProperties: true,
       properties: {
         price: {
           label: 'Price',
@@ -93,7 +66,26 @@ const action: ActionDefinition<Settings, Payload> = {
         }
       },
       default: {
-        '@path': '$.properties.products'
+        '@arrayPath': [
+          '$.properties.products',
+          {
+            price: {
+              '@path': 'price'
+            },
+            revenue: {
+              '@path': 'revenue'
+            },
+            quantity: {
+              '@path': 'quantity'
+            },
+            productId: {
+              '@path': 'productId'
+            },
+            revenueType: {
+              '@path': 'revenueType'
+            }
+          }
+        ]
       }
     },
     use_batch_endpoint: {
@@ -117,6 +109,13 @@ const action: ActionDefinition<Settings, Payload> = {
       description:
         'Enabling this setting will set the Device manufacturer, Device Model and OS Name properties based on the user agent string provided in the userAgent field',
       default: true
+    },
+    includeRawUserAgent: {
+      label: 'Include Raw User Agent',
+      type: 'boolean',
+      description:
+        'Enabling this setting will send user_agent based on the raw user agent string provided in the userAgent field',
+      default: false
     },
     utm_properties: {
       label: 'UTM Properties',
@@ -167,21 +166,23 @@ const action: ActionDefinition<Settings, Payload> = {
         'Amplitude has a default minimum id lenght of 5 characters for user_id and device_id fields. This field allows the minimum to be overridden to allow shorter id lengths.',
       allowNull: true,
       type: 'integer'
-    }
+    },
+    userAgentData
   },
   perform: (request, { payload, settings }) => {
     // Omit revenue properties initially because we will manually stitch those into events as prescribed
     const {
-      products = [],
-      trackRevenuePerProduct,
       time,
       session_id,
       userAgent,
       userAgentParsing,
+      includeRawUserAgent,
+      userAgentData,
       utm_properties,
       referrer,
       min_id_length,
       library,
+      library2,
       ...rest
     } = omit(payload, revenueKeys)
     const properties = rest as AmplitudeEvent
@@ -191,16 +192,16 @@ const action: ActionDefinition<Settings, Payload> = {
       properties.platform = properties.platform.replace(/ios/i, 'iOS').replace(/android/i, 'Android')
     }
 
-    if (library) {
-      if (library === 'analytics.js') properties.platform = 'Web'
+    if (library === 'analytics.js' && !properties.platform) {
+      properties.platform = 'Web'
     }
-
+   
     if (time && dayjs.utc(time).isValid()) {
       properties.time = dayjs.utc(time).valueOf()
     }
 
     if (session_id && dayjs.utc(session_id).isValid()) {
-      properties.session_id = dayjs.utc(session_id).valueOf()
+      properties.session_id = formatSessionId(session_id)
     }
 
     if (Object.keys(payload.utm_properties ?? {}).length || payload.referrer) {
@@ -218,26 +219,13 @@ const action: ActionDefinition<Settings, Payload> = {
     const events: AmplitudeEvent[] = [
       {
         // Conditionally parse user agent using amplitude's library
-        ...(userAgentParsing && parseUserAgentProperties(userAgent)),
+        ...(userAgentParsing && parseUserAgentProperties(userAgent, userAgentData)),
+        ...(includeRawUserAgent && { user_agent: userAgent }),
         // Make sure any top-level properties take precedence over user-agent properties
         ...removeUndefined(properties),
-        // Conditionally track revenue with main event
-        ...(products.length && trackRevenuePerProduct ? {} : getRevenueProperties(payload)),
-        library: 'segment'
+        library: library2?.behavior === 'use_mapping' ? library2.mapping : 'segment'
       }
     ]
-
-    for (const product of products) {
-      events.push({
-        ...properties,
-        // Or track revenue per product
-        ...(trackRevenuePerProduct ? getRevenueProperties(product as EventRevenue) : {}),
-        event_properties: product,
-        event_type: 'Product Purchased',
-        insert_id: properties.insert_id ? `${properties.insert_id}-${events.length + 1}` : undefined,
-        library: 'segment'
-      })
-    }
 
     const endpoint = getEndpointByRegion(payload.use_batch_endpoint ? 'batch' : 'httpapi', settings.endpoint)
 

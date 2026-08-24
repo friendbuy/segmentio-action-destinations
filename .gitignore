@@ -2,7 +2,17 @@ node_modules
 dist
 .DS_Store
 *.log
-*.tsbuildinfo
+*.tsbuildinfo*
 .eslintcache
 package-lock.json
 .env
+# JetBrains byproduct
+.idea
+coverage
+
+# playwright
+playwright-report
+
+# NX
+.nx/cache
+.nx/workspace-data

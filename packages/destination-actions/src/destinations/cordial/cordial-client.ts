@@ -1,165 +1,153 @@
 import { Settings } from './generated-types'
 import { RequestClient } from '@segment/actions-core'
-import { Payload as ContactActivityPayload } from './createContactactivity/generated-types'
-import {UserIdentifier} from "./user-identifier";
+import { Payload as AddContactToListPayload } from './addContactToList/generated-types'
+import { Payload as CreateContactactivityPayload } from './createContactactivity/generated-types'
+import { Payload as RemoveContactFromListPayload } from './removeContactFromList/generated-types'
+import { Payload as UpsertContactPayload } from './upsertContact/generated-types'
+import { Payload as AddProductToCartPayload } from './addProductToCart/generated-types'
+import { Payload as RemoveProductFromCartPayload } from './removeProductFromCart/generated-types'
+import { Payload as UpsertOrder } from './upsertOrder/generated-types'
+import { Payload as MergeContacts } from './mergeContacts/generated-types'
+import isEmpty from 'lodash/isEmpty'
 
-interface Attribute {
-  name: string
-  type: string
-  key: string
-}
-
-interface ContactAttributes {
-  [key: string]: string | number
-}
-
-interface List {
-  id: number
-  name: string
-  segment_group_id: string
-}
-
-interface CreateListResponse {
-  id: number
-  success: boolean
+export interface IdentifiableRequest {
+  segmentId?: string | null,
+  anonymousId?: string | null,
+  userIdentities?: {
+    [k: string]: unknown
+  }
 }
 
 class CordialClient {
   private readonly apiUrl: string
   private readonly request: RequestClient
+  private readonly identityKeys: object
 
   constructor(settings: Settings, request: RequestClient) {
-    this.apiUrl = `${settings.endpoint}/v2`
+    this.apiUrl = `${settings.endpoint}/api/segment`
     this.request = request
+    this.identityKeys = {
+      segmentIdKey: settings.segmentIdKey,
+    }
   }
 
-  addContactActivity(payload: ContactActivityPayload) {
-    return this.request(`${this.apiUrl}/contactactivities`, {
+  extractIdentities(payload: IdentifiableRequest): IdentifiableRequest {
+    return {
+      segmentId: payload.segmentId,
+      anonymousId: payload.anonymousId,
+      userIdentities: payload.userIdentities,
+    }
+  }
+
+  async addContactActivity(payload: CreateContactactivityPayload) {
+    return this.request(`${this.apiUrl}/createContactactivity`, {
       method: 'post',
       json: {
-        [payload.identifyByKey]: payload.identifyByValue,
-        a: payload.action,
+        ...this.identityKeys,
+        ...this.extractIdentities(payload),
+        action: payload.action,
         time: payload.time,
+        properties: payload.properties,
+        context: payload.context
+      }
+    })
+  }
+
+  async upsertContact(payload: UpsertContactPayload) {
+    return this.request(`${this.apiUrl}/upsertContact`, {
+      method: 'post',
+      json: {
+        ...this.identityKeys,
+        ...this.extractIdentities(payload),
+        attributes: payload.attributes
+      }
+    })
+  }
+
+  async addContactToList(payload: AddContactToListPayload) {
+    return this.request(`${this.apiUrl}/addContactToList`, {
+      method: 'post',
+      json: {
+        ...this.identityKeys,
+        ...this.extractIdentities(payload),
+        groupId: payload.groupId,
+        listName: payload.listName
+      }
+    })
+  }
+
+  async removeContactFromList(payload: RemoveContactFromListPayload) {
+    return this.request(`${this.apiUrl}/removeContactFromList`, {
+      method: 'post',
+      json: {
+        ...this.identityKeys,
+        ...this.extractIdentities(payload),
+        groupId: payload.groupId
+      }
+    })
+  }
+
+  async addProductToCart(payload: AddProductToCartPayload) {
+    return this.request(`${this.apiUrl}/addProductToCart`, {
+      method: 'post',
+      json: {
+        ...this.identityKeys,
+        ...this.extractIdentities(payload),
+        productID: payload.productID,
+        sku: payload.sku,
+        qty: payload.qty,
+        category: payload.category,
+        name: payload.name,
+        description: payload.description,
+        itemPrice: payload.itemPrice,
+        url: payload.url,
+        imageUrl: payload.imageUrl,
         properties: payload.properties
       }
     })
   }
 
-  async upsertContact(userIdentifier: UserIdentifier, attributes?: ContactAttributes) {
-    return this.request(`${this.apiUrl}/contacts`, {
+  async removeProductFromCart(payload: RemoveProductFromCartPayload) {
+    return this.request(`${this.apiUrl}/removeProductFromCart`, {
       method: 'post',
       json: {
-        ...userIdentifier,
-        ...attributes,
-        request_source: 'integration-segment'
+        ...this.identityKeys,
+        ...this.extractIdentities(payload),
+        productID: payload.productID,
+        qty: payload.qty
       }
     })
   }
 
-  async getList(segmentGroupId: string, listName?: string): Promise<List | null> {
-    let result = null
-    try {
-      const lists = await this.request<Array<List>>(`${this.apiUrl}/accountlists`, {
-        method: 'get'
-      })
-
-      for (const list of lists.data) {
-        if (list.segment_group_id == segmentGroupId) {
-          result = list
-          break
-        }
-      }
-
-      if (!result && listName) {
-        listName = this.prepareListName(listName)
-        for (const list of lists.data) {
-          if (list.name == listName) {
-            result = list
-            break
-          }
-        }
-      }
-    } catch (e) {
-      return result
-    }
-
-    return result
-  }
-
-  async upsertList(segmentGroupId: string, listName?: string): Promise<List> {
-    const list = await this.getList(segmentGroupId, listName)
-    if (list) {
-      return list
-    }
-
-    if (!listName) {
-      listName = 'segment_' + segmentGroupId
-    }
-
-    listName = this.prepareListName(listName)
-
-    const response = await this.request<CreateListResponse>(`${this.apiUrl}/accountlists`, {
+  async upsertOrder(payload: UpsertOrder) {
+    return this.request(`${this.apiUrl}/upsertOrder`, {
       method: 'post',
       json: {
-        name: listName,
-        enhanced: true,
-        segment_group_id: segmentGroupId
+        ...this.identityKeys,
+        ...this.extractIdentities(payload),
+        orderID: payload.orderID,
+        purchaseDate: payload.purchaseDate,
+        status: payload.status,
+        totalAmount: payload.totalAmount,
+        properties: payload.properties,
+        items: payload.items,
+        discountApplication: (!isEmpty(payload.discountApplication) && payload?.discountApplication?.type === 'fixed' && payload?.discountApplication?.amount)
+          ? payload.discountApplication
+          : null
       }
     })
-
-    return {
-      id: response.data.id,
-      name: listName,
-      segment_group_id: segmentGroupId
-    }
   }
 
-  async addContactToList(userIdentifier: UserIdentifier, list: List) {
-    return this.request(`${this.apiUrl}/contacts`, {
+  mergeContacts(payload: MergeContacts) {
+    return this.request(`${this.apiUrl}/mergeContacts`, {
       method: 'post',
       json: {
-        ...userIdentifier,
-        [list.name]: true
+        ...this.identityKeys,
+        anonymousId: payload.anonymousId,
+        segmentId: payload.segmentId,
+        previousId: payload.previousId
       }
     })
-  }
-
-  async removeContactFromList(userIdentifier: UserIdentifier, list: List) {
-    return this.request(`${this.apiUrl}/contacts`, {
-      method: 'post',
-      json: {
-        ...userIdentifier,
-        [list.name]: false
-      }
-    })
-  }
-
-  async transformAttributes(rawAttributes: { [key: string]: any }): Promise<ContactAttributes> {
-    const attributes: ContactAttributes = {}
-    const availableAttributes = await this.getAttributes()
-
-    for (const key in availableAttributes) {
-      if (key in rawAttributes) {
-        const value = rawAttributes[key]
-        if (typeof value !== 'object') {
-          attributes[key] = value
-        }
-      }
-    }
-
-    return attributes
-  }
-
-  protected async getAttributes(): Promise<{ [key: string]: Attribute }> {
-    const response = await this.request<{ [key: string]: Attribute }>(`${this.apiUrl}/accountcontactattributes`, {
-      method: 'get'
-    })
-
-    return response.data
-  }
-
-  protected prepareListName(listName: string): string {
-    return listName.replace(' ', '-')
   }
 }
 

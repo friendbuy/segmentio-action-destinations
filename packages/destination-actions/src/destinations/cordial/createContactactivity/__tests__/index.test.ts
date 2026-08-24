@@ -6,26 +6,24 @@ const testDestination = createTestIntegration(Destination)
 
 describe('Cordial.createContactactivity', () => {
   it('should work with default mappings', async () => {
-    nock(/api.cordial.io/).post('/v2/contactactivities').reply(200, {})
+    nock(/api.cordial.io/).post('/api/segment/createContactactivity').reply(200, {})
     const event = createTestEvent()
 
     const mapping = {
-      identifyByKey: 'email'
+      userIdentities: {'channels.email.address': 'contact@example.com'}
     }
 
     const settings = {
       apiKey: 'cordialApiKey',
-      endpoint: 'https://api.cordial.io' as const
+      endpoint: 'https://api.cordial.io' as const,
+      segmentIdKey: 'segment_id'
     }
 
-    const responses = await testDestination.testAction('createContactactivity', {
+    await testDestination.testAction('createContactactivity', {
       event,
       mapping,
       settings,
       useDefaultMappings: true
     })
-
-    expect(responses.length).toBe(1)
-    expect(responses[0].status).toBe(200)
   })
 })

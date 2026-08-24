@@ -1,0 +1,82 @@
+# This workflow is triggered manually via the GitHub Actions page or API
+name: Version Packages
+run-name: Version Packages ${{ github.event.inputs.run_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to create PR from'
+        required: true
+        default: 'release-actions'
+      base_branch:
+        description: 'Base branch to create PR to'
+        required: true
+        default: 'main'
+      run_id:
+        description: 'Unique identifier for the run'
+        required: false
+
+jobs:
+  build-and-version-packages:
+    strategy:
+      matrix:
+        node-version: [22.x]
+    env:
+      HUSKY: 0
+      NX_DISABLE_DB: true
+      BASE_BRANCH: ${{ github.event.inputs.base_branch }}
+      BRANCH: ${{ github.event.inputs.branch }}
+      RUN_ID: ${{ github.event.inputs.run_id }}
+    runs-on: ubuntu-latest-large
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          ref: ${{ env.BASE_BRANCH }}
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          registry-url: 'https://registry.npmjs.org'
+          cache: yarn
+
+      - name: Checkout branch
+        run: |
+          git checkout -b ${{ env.BRANCH }}
+          git push origin ${{ env.BRANCH }}
+
+      - name: Install Dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Build
+        run: NODE_ENV=production yarn build
+
+      - name: Version Packages
+        run: |
+          # minor version bump for main branch and patch for hotfixes
+          if [ "${{ env.BASE_BRANCH }}" == "main" ]; then
+            yarn lerna version minor --yes --allow-branch ${{ env.BRANCH }} --no-git-tag-version --no-commit-hooks --no-private
+          else
+            yarn lerna version patch --yes --allow-branch ${{ env.BRANCH }} --no-git-tag-version --no-commit-hooks --no-private
+          fi
+
+      - name: Commit and push
+        run: |
+          git add .
+          count=$(git diff --cached --stat)
+          if [ -z "$count" ]; then
+            echo "No changes to commit"
+            exit 0
+          fi
+
+          git commit -m "Publish"
+          git push origin ${{ env.BRANCH }}

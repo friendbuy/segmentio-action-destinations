@@ -6,7 +6,9 @@ import chokidar from 'chokidar'
 import ora from 'ora'
 import path from 'path'
 import globby from 'globby'
-
+import { WebSocketServer } from 'ws'
+import open from 'open'
+import execa from 'execa'
 export default class Serve extends Command {
   private spinner: ora.Ora = ora()
 
@@ -19,7 +21,8 @@ export default class Serve extends Command {
 
   static args = []
 
-  static flags = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  static flags: flags.Input<any> = {
     help: flags.help({ char: 'h' }),
     destination: flags.string({
       char: 'd',
@@ -29,13 +32,21 @@ export default class Serve extends Command {
       char: 'b',
       description: 'destination actions directory',
       default: './packages/destination-actions/src/destinations'
+    }),
+    noUI: flags.boolean({
+      char: 'n',
+      description: 'do not open actions tester UI in browser'
+    }),
+    browser: flags.boolean({
+      char: 'r',
+      description: 'serve browser destinations'
     })
   }
 
   async run() {
     const { argv, flags } = this.parse(Serve)
     let destinationName = flags.destination
-
+    const isBrowser = !!flags.browser
     if (!destinationName) {
       const integrationsGlob = `${flags.directory}/*`
       const integrationDirs = await globby(integrationsGlob, {
@@ -46,14 +57,14 @@ export default class Serve extends Command {
       })
 
       const { selectedDestination } = await autoPrompt<{ selectedDestination: { name: string } }>(flags, {
-        type: 'select',
+        type: 'autocomplete',
         name: 'selectedDestination',
         message: 'Which destination?',
         choices: integrationDirs.map((integrationPath) => {
           const [name] = integrationPath.split(path.sep).reverse()
           return {
             title: name,
-            value: { name }
+            value: { name: name }
           }
         })
       })
@@ -76,6 +87,19 @@ export default class Serve extends Command {
       cwd: process.cwd()
     })
 
+    const DEFAULT_PORT = 3000
+    const port = parseInt(process.env.PORT ?? '', 10) || DEFAULT_PORT
+
+    if (!flags.noUI) {
+      const wss = new WebSocketServer({ port: port + 1 })
+
+      wss.on('connection', function connection(ws) {
+        watcher.on('change', () => {
+          ws.send('change')
+        })
+      })
+    }
+
     const start = () => {
       child = fork(require.resolve('../lib/server.ts'), {
         cwd: process.cwd(),
@@ -83,7 +107,8 @@ export default class Serve extends Command {
           ...process.env,
           DESTINATION: destinationName,
           DIRECTORY: flags.directory,
-          TS_NODE_PROJECT: require.resolve('../../tsconfig.json')
+          TS_NODE_PROJECT: require.resolve('../../tsconfig.json'),
+          ENTRY: isBrowser ? path.join('src', 'index.ts') : 'index.ts'
         },
         execArgv: [
           '-r',
@@ -102,6 +127,10 @@ export default class Serve extends Command {
         child?.removeAllListeners()
         child = undefined
       })
+
+      if (flags.browser) {
+        execa.command('yarn browser dev').stdout
+      }
     }
 
     watcher.on('change', (file) => {
@@ -123,6 +152,13 @@ export default class Serve extends Command {
 
     watcher.once('ready', () => {
       this.log(chalk.greenBright`Watching required files for changes .. `)
+
+      if (!flags.noUI) {
+        this.log(
+          chalk.greenBright`Visit https://app.segment.com/dev-center/actions-tester to preview your integration.`
+        )
+        void open('https://app.segment.com/dev-center/actions-tester')
+      }
     })
 
     start()

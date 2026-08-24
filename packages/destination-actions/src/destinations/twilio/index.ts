@@ -4,6 +4,7 @@ import sendSMS from './sendSms'
 
 const destination: DestinationDefinition<Settings> = {
   name: 'Twilio',
+  slug: 'actions-twilio',
   mode: 'cloud',
   authentication: {
     scheme: 'basic',
@@ -17,7 +18,7 @@ const destination: DestinationDefinition<Settings> = {
       token: {
         label: 'Token',
         description: 'Your Twilio Token.',
-        type: 'string',
+        type: 'password',
         required: true
       },
       phoneNumber: {

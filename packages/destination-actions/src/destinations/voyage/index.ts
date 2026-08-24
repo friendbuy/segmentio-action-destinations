@@ -15,10 +15,10 @@ const destination: DestinationDefinition<Settings> = {
         label: 'API Key',
         description:
           'Voyage API key. You can create a new API key or find your existing API key in the Advanced section of your [Settings page](https://app.voyagetext.com/dashboard/settings/advanced).',
-        type: 'string',
+        type: 'password',
         required: true
       }
-    },
+    }
   },
 
   extendRequest: ({ settings }) => {
@@ -34,7 +34,8 @@ const destination: DestinationDefinition<Settings> = {
       name: 'Track Order Placed Event',
       subscribe: 'type = "track"',
       partnerAction: 'trackOrderPlaced',
-      mapping: defaultValues(trackOrderPlaced.fields)
+      mapping: defaultValues(trackOrderPlaced.fields),
+      type: 'automatic'
     }
   ],
 

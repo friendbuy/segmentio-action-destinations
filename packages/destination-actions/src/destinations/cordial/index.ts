@@ -5,20 +5,24 @@ import createContactactivity from './createContactactivity'
 import upsertContact from './upsertContact'
 import addContactToList from './addContactToList'
 import removeContactFromList from './removeContactFromList'
+import addProductToCart from './addProductToCart'
+import removeProductFromCart from './removeProductFromCart'
+import upsertOrder from './upsertOrder'
+
+import mergeContacts from './mergeContacts'
 
 const destination: DestinationDefinition<Settings> = {
   name: 'Cordial (Actions)',
   description: 'Sync Segment Users, Groups and Events to Cordial',
   slug: 'actions-cordial',
   mode: 'cloud',
-
   authentication: {
-    scheme: 'basic',
+    scheme: 'custom',
     fields: {
       apiKey: {
         label: 'API Key',
         description: 'Your Cordial API Key',
-        type: 'string',
+        type: 'password',
         required: true
       },
       endpoint: {
@@ -28,28 +32,35 @@ const destination: DestinationDefinition<Settings> = {
         type: 'string',
         required: true,
         format: 'uri',
-        choices: [
-          { label: 'US-EAST	(https://api.cordial.io)', value: 'https://api.cordial.io' },
-          { label: 'US-WEST	(https://api.usw2.cordial.io)', value: 'https://api.usw2.cordial.io' },
-          { label: 'Staging	(https://api.stg.cordialdev.com)', value: 'https://api.stg.cordialdev.com' }
-        ],
-        default: 'https://api.cordial.io'
+        default: 'https://integrations-ingest-svc.usw1.cordial.com'
+      },
+      segmentIdKey: {
+        label: 'User ID attribute key',
+        description: 'Cordial string unique attribute key to store Segment User ID in (e.g. `segment_id`)',
+        type: 'string',
+        required: false
       }
     },
     testAuthentication: (request, { settings }) => {
-      return request(settings.endpoint + '/v2/health')
+      return request(settings.endpoint + '/api/checkAuth', { headers: { 'Content-Type': 'application/json' } })
     }
   },
 
   extendRequest({ settings }) {
-    return { username: settings.apiKey }
+    return {
+      headers: { 'x-api-key': `${settings.apiKey}`, Accept: 'application/json' }
+    }
   },
 
   actions: {
     createContactactivity,
     upsertContact,
     addContactToList,
-    removeContactFromList
+    removeContactFromList,
+    addProductToCart,
+    removeProductFromCart,
+    upsertOrder,
+    mergeContacts
   }
 }
 

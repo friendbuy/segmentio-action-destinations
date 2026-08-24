@@ -1,10 +1,51 @@
 export { Destination, fieldsToJsonSchema } from './destination-kit'
 export { getAuthData } from './destination-kit/parse-settings'
-export { transform } from './mapping-kit'
+export { transform, Features } from './mapping-kit'
+export {
+  ArrayPathDirective,
+  CaseDirective,
+  Directive,
+  DirectiveMetadata,
+  FieldValue,
+  IfDirective,
+  LiteralDirective,
+  PathDirective,
+  PrimitiveValue,
+  ReplaceDirective,
+  TemplateDirective,
+  JSONDirective,
+  getFieldValue,
+  getFieldValueKeys,
+  isArrayPathDirective,
+  isCaseDirective,
+  isDirective,
+  isIfDirective,
+  isLiteralDirective,
+  isPathDirective,
+  isReplaceDirective,
+  isTemplateDirective,
+  isJSONDirective,
+  isExcludeWhenNullDirective
+} from './mapping-kit/value-keys'
 export { createTestEvent } from './create-test-event'
 export { createTestIntegration } from './create-test-integration'
+export { default as createInstance, RequestTimeoutError } from './request-client'
+export { default as createRequestClient } from './create-request-client'
 export { defaultValues } from './defaults'
-export { IntegrationError, InvalidAuthenticationError, RetryableError } from './errors'
+export {
+  IntegrationError,
+  InvalidAuthenticationError,
+  RetryableError,
+  PayloadValidationError,
+  InvalidAudienceMembershipError,
+  SelfTimeoutError,
+  APIError,
+  ErrorCodes,
+  HttpErrorCodes,
+  CustomErrorCodes,
+  getErrorCodeFromHttpStatus
+} from './errors'
+export { retry } from './retry'
 export { get } from './get'
 export { omit } from './omit'
 export { removeUndefined } from './remove-undefined'
@@ -13,15 +54,19 @@ export { time, duration } from './time'
 export { realTypeOf, isObject, isArray, isString } from './real-type-of'
 
 export type { RequestOptions } from './request-client'
-export { HTTPError } from './request-client'
+export { HTTPError, DEFAULT_REQUEST_TIMEOUT } from './request-client'
 export { ModifiedResponse } from './types'
 export { default as fetch, Request, Response, Headers } from './fetch'
 
 export type {
   BaseActionDefinition,
   ActionDefinition,
+  AsyncActionDefinition,
+  ActionHookResponse,
   BaseDefinition,
   DestinationDefinition,
+  AudienceDestinationDefinition,
+  WarehouseDestinationDefinition,
   ExecuteInput,
   Subscription,
   SubscriptionStats,
@@ -29,19 +74,30 @@ export type {
   BasicAuthentication,
   CustomAuthentication,
   OAuth2Authentication,
+  OAuthManagedAuthentication,
   OAuth2ClientCredentials,
   RefreshAccessTokenResult,
   RequestFn,
   DecoratedResponse,
-  MinimalInputField
+  MinimalInputField,
+  StateContext,
+  StatsContext,
+  Logger,
+  Preset,
+  Result,
+  PollPayload,
+  PollResponse
 } from './destination-kit'
 
 export type {
+  AudienceMembership,
   DynamicFieldResponse,
+  DynamicFieldError,
   DynamicFieldItem,
   InputField,
   GlobalSetting,
-  RequestExtension
+  RequestExtension,
+  SyncModeDefinition
 } from './destination-kit/types'
 
 export type { JSONPrimitive, JSONValue, JSONObject, JSONArray, JSONLike, JSONLikeObject } from './json-object'
@@ -49,3 +105,14 @@ export type { JSONPrimitive, JSONValue, JSONObject, JSONArray, JSONLike, JSONLik
 export type { SegmentEvent } from './segment-event'
 
 export type { RequestClient } from './create-request-client'
+
+export {
+  ActionDestinationSuccessResponse,
+  ActionDestinationErrorResponse,
+  AsyncBatchResponse,
+  MultiStatusResponse
+} from './destination-kit/action'
+
+export { validateSchema } from './schema-validation'
+export { resolveAudienceMembership } from './audience-membership'
+export { FLAGS } from './flags'

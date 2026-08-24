@@ -25,23 +25,28 @@ const action: ActionDefinition<Settings, Payload> = {
       type: 'string',
       required: true,
       default: {
-        '@path': '$.userId'
+        '@path': '$.groupId'
       }
     },
     name: {
       label: 'Organization Name',
       description: 'Name of the organization',
       type: 'string',
-      required: false
+      required: false,
+      default: {
+        '@path': '$.traits.name'
+      }
     },
     visible_to: {
       label: 'Visible To',
       description:
-        'Visibility of the Organization. If omitted, visibility will be set to the default visibility setting of this item type for the authorized user.',
-      type: 'integer',
+        "Visibility of the Organization. If omitted, visibility will be set to the default visibility setting of this item type for the authorized user. 'Owner's visibility group and sub-groups' and 'Entire company' options only available with Professional or Enterprise plans",
+      type: 'string',
       choices: [
-        { label: 'Owner & followers (private)', value: 1 },
-        { label: 'Entire company (shared)', value: 3 }
+        { label: 'Owner & followers (private)', value: '1' },
+        { label: 'Entire company (shared)', value: '3' },
+        { label: "Owner's visibility group and sub-groups", value: '5' },
+        { label: 'Entire company', value: '7' }
       ],
       required: false
     },
@@ -51,7 +56,6 @@ const action: ActionDefinition<Settings, Payload> = {
         'If the organization is created, use this timestamp as the creation timestamp. Format: YYY-MM-DD HH:MM:SS',
       type: 'datetime'
     },
-
     custom_fields: {
       label: 'Custom fields',
       description: 'New values for custom fields.',
@@ -65,7 +69,7 @@ const action: ActionDefinition<Settings, Payload> = {
   },
 
   perform: async (request, { payload, settings }) => {
-    const searchField = payload.match_field || settings.personField || 'id'
+    const searchField = payload.match_field || settings.organizationField || 'id'
 
     const client = new PipedriveClient(settings, request)
 
@@ -76,6 +80,11 @@ const action: ActionDefinition<Settings, Payload> = {
       add_time: payload.add_time ? `${payload.add_time}` : undefined,
       visible_to: payload.visible_to
     }
+
+    if (!organizationId)
+      if (payload.match_field && payload.match_value)
+        // if doing a create, write the match_field and match_value data to the new Organization object's custom field
+        Object.assign(organization, { [payload.match_field]: payload.match_value })
 
     addCustomFieldsFromPayloadToEntity(payload, organization)
 

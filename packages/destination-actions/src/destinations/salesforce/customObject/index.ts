@@ -1,26 +1,58 @@
-import type { ActionDefinition } from '@segment/actions-core'
+import { ActionDefinition } from '@segment/actions-core'
 import type { Settings } from '../generated-types'
 import type { Payload } from './generated-types'
-import { operation, traits, customFields, validateLookup } from '../sf-properties'
-import Salesforce from '../sf-operations'
+import {
+  bulkUpsertExternalId,
+  bulkUpdateRecordId,
+  operation,
+  traits,
+  customFields,
+  validateLookup,
+  enable_batching,
+  recordMatcherOperator,
+  batch_size
+} from '../sf-properties'
+import Salesforce, { generateSalesforceRequest } from '../sf-operations'
+import { PayloadValidationError } from '@segment/actions-core'
+const OPERATIONS_WITH_CUSTOM_FIELDS = ['create', 'update', 'upsert']
 
 const action: ActionDefinition<Settings, Payload> = {
   title: 'Custom Object',
-  description: 'Custom Object',
+  description: 'Create, update, or upsert records in any custom or standard object in Salesforce.',
   fields: {
     operation: operation,
+    recordMatcherOperator: recordMatcherOperator,
+    enable_batching: enable_batching,
+    batch_size: batch_size,
     traits: traits,
+    bulkUpsertExternalId: bulkUpsertExternalId,
+    bulkUpdateRecordId: bulkUpdateRecordId,
     customObjectName: {
       label: 'Salesforce Object',
       description:
-        'The API name of the Salesforce object that records will be added or updated within. The object must be predefined in your Salesforce account. Values should end with "__c".',
+        'The API name of the Salesforce object that records will be added or updated within. This can be a standard or custom object. Custom objects must be predefined in your Salesforce account and should end with "__c".',
       type: 'string',
-      required: true
+      required: true,
+      dynamic: true
     },
-    customFields: { ...customFields, required: true }
+    customFields: customFields
+  },
+  dynamicFields: {
+    customObjectName: async (request, data) => {
+      const sf: Salesforce = new Salesforce(
+        data.settings.instanceUrl,
+        await generateSalesforceRequest(data.settings, request)
+      )
+
+      return sf.customObjectName()
+    }
   },
   perform: async (request, { settings, payload }) => {
-    const sf: Salesforce = new Salesforce(settings.instanceUrl, request)
+    if (OPERATIONS_WITH_CUSTOM_FIELDS.includes(payload.operation) && !payload.customFields) {
+      throw new PayloadValidationError('Custom fields are required for this operation.')
+    }
+
+    const sf: Salesforce = new Salesforce(settings.instanceUrl, await generateSalesforceRequest(settings, request))
 
     if (payload.operation === 'create') {
       return await sf.createRecord(payload, payload.customObjectName)
@@ -35,6 +67,28 @@ const action: ActionDefinition<Settings, Payload> = {
     if (payload.operation === 'upsert') {
       return await sf.upsertRecord(payload, payload.customObjectName)
     }
+
+    if (payload.operation === 'delete') {
+      return await sf.deleteRecord(payload, payload.customObjectName)
+    }
+  },
+  performBatch: async (request, { settings, payload, features, statsContext, logger }) => {
+    if (OPERATIONS_WITH_CUSTOM_FIELDS.includes(payload[0].operation) && !payload[0].customFields) {
+      throw new PayloadValidationError('Custom fields are required for this operation.')
+    }
+
+    const sf: Salesforce = new Salesforce(settings.instanceUrl, await generateSalesforceRequest(settings, request))
+
+    let shouldShowAdvancedLogging = false
+    if (features && features['salesforce-advanced-logging']) {
+      shouldShowAdvancedLogging = true
+    }
+
+    return sf.bulkHandler(payload, payload[0].customObjectName, {
+      shouldLog: shouldShowAdvancedLogging,
+      stats: statsContext,
+      logger
+    })
   }
 }
 

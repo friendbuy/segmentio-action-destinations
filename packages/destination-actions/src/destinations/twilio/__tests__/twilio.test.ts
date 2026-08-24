@@ -14,7 +14,8 @@ describe('Twilio', () => {
         event: 'Test Event',
         properties: {
           To: '+17758638863',
-          Body: 'Hello, World!'
+          Body: 'Hello, World!',
+          MediaUrl: 'https://demo.twilio.com/owl.png'
         }
       })
 
@@ -33,6 +34,9 @@ describe('Twilio', () => {
           },
           Body: {
             '@path': '$.properties.Body'
+          },
+          MediaUrl: {
+            '@path': '$.properties.MediaUrl'
           }
         },
         useDefaultMappings: true
@@ -41,19 +45,9 @@ describe('Twilio', () => {
       expect(responses.length).toBe(1)
       expect(responses[0].status).toBe(201)
 
-      expect(responses[0].options.body).toMatchInlineSnapshot(`
-        URLSearchParams {
-          Symbol(query): Array [
-            "From",
-            "+12056065576",
-            "To",
-            "+17758638863",
-            "Body",
-            "Hello, World!",
-          ],
-          Symbol(context): null,
-        }
-      `)
+      expect(responses[0].options.body?.toString()).toMatchInlineSnapshot(
+        `"From=%2B12056065576&To=%2B17758638863&Body=Hello%2C+World%21&MediaUrl=https%3A%2F%2Fdemo.twilio.com%2Fowl.png"`
+      )
 
       expect(responses[0].request.headers).toMatchInlineSnapshot(`
         Headers {

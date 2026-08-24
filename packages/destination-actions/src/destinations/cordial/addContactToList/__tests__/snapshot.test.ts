@@ -15,17 +15,8 @@ describe(`Testing snapshot for ${destinationSlug}'s ${actionSlug} destination ac
     const [eventData, settingsData] = generateTestData(seedName, destination, action, false)
 
     nock(/.*/)
-      .post(/\/.*\/contacts/)
+      .post(/\/.*\/addContactToList/)
       .reply(200, {})
-    nock(/.*/)
-      .get(/\/.*\/accountlists/)
-      .reply(200, [
-        {
-          id: 123,
-          name: 'segment_test-group',
-          segment_group_id: 'group1234'
-        }
-      ])
 
     const event = createTestEvent({
       properties: eventData,
@@ -35,8 +26,11 @@ describe(`Testing snapshot for ${destinationSlug}'s ${actionSlug} destination ac
       }
     })
 
+    // static anonId
+    event.anonymousId = "373d36f4-985b-44bf-89ce-a7be430a583d"
+
     const mapping = {
-      identifyByKey: 'email'
+      userIdentities: {'channels.email.address': 'contact@example.com'}
     }
 
     const responses = await testDestination.testAction(actionSlug, {
@@ -47,7 +41,7 @@ describe(`Testing snapshot for ${destinationSlug}'s ${actionSlug} destination ac
       auth: undefined
     })
 
-    const request = responses[1].request
+    const request = responses[0].request
     const rawBody = await request.text()
 
     try {
@@ -64,25 +58,19 @@ describe(`Testing snapshot for ${destinationSlug}'s ${actionSlug} destination ac
     const [eventData, settingsData] = generateTestData(seedName, destination, action, false)
 
     nock(/.*/)
-      .post(/\/.*\/contacts/)
+      .post(/\/.*\/addContactToList/)
       .reply(200, {})
-    nock(/.*/)
-      .get(/\/.*\/accountlists/)
-      .reply(200, [
-        {
-          id: 123,
-          name: 'segment_test-group',
-          segment_group_id: 'group1234'
-        }
-      ])
 
     const event = createTestEvent({
       properties: eventData,
       groupId: 'group1234'
     })
 
+    // static anonId
+    event.anonymousId = "985b44bf-09ce-47be-830a-583d54d049cb"
+
     const mapping = {
-      identifyByKey: 'email'
+      userIdentities: {'channels.email.address': 'contact@example.com'}
     }
 
     const responses = await testDestination.testAction(actionSlug, {
@@ -93,7 +81,7 @@ describe(`Testing snapshot for ${destinationSlug}'s ${actionSlug} destination ac
       auth: undefined
     })
 
-    const request = responses[1].request
+    const request = responses[0].request
     const rawBody = await request.text()
 
     try {

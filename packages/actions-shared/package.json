@@ -1,7 +1,7 @@
 {
   "name": "@segment/actions-shared",
   "description": "Shared destination action methods and definitions.",
-  "version": "1.3.0",
+  "version": "1.164.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/segmentio/action-destinations",
@@ -14,7 +14,7 @@
     "package.json"
   ],
   "engines": {
-    "node": "^14.16"
+    "node": "^18.17 || ^22.13"
   },
   "engineStrict": true,
   "license": "MIT",
@@ -23,7 +23,7 @@
     "registry": "https://registry.npmjs.org"
   },
   "scripts": {
-    "build": "yarn clean && yarn tsc -b tsconfig.build.json",
+    "build": "yarn tsc -b tsconfig.build.json",
     "clean": "tsc -b tsconfig.build.json --clean",
     "postclean": "rm -rf dist",
     "prepublishOnly": "yarn build",
@@ -32,21 +32,25 @@
   },
   "devDependencies": {
     "@types/jest": "^27.0.0",
-    "@types/mustache": "^4.1.2",
     "jest": "^27.3.1",
     "nock": "^13.1.4"
   },
   "dependencies": {
     "@amplitude/ua-parser-js": "^0.7.25",
-    "@segment/actions-core": "^3.22.0",
+    "@segment/actions-core": "^3.177.0",
     "cheerio": "^1.0.0-rc.10",
     "dayjs": "^1.10.7",
     "escape-goat": "^3",
-    "lodash": "^4.17.21",
-    "mustache": "^4.2.0"
+    "liquidjs": "^10.27.2",
+    "lodash": "^4.18.1"
   },
   "jest": {
     "preset": "ts-jest",
+    "globals": {
+      "ts-jest": {
+        "isolatedModules": true
+      }
+    },
     "testEnvironment": "node",
     "modulePathIgnorePatterns": [
       "<rootDir>/dist/"

@@ -2,20 +2,24 @@
 
 exports[`Testing snapshot for Cordial's removeContactFromList destination action: default fields, group id only 1`] = `
 Object {
-  "email": "user1234",
-  "identifyBy": Array [
-    "email",
-  ],
-  "segment_test-group": false,
+  "anonymousId": "f91d0805-0a5b-48a5-b543-96045ce7049a",
+  "groupId": "group1234",
+  "segmentId": "user1234",
+  "segmentIdKey": "^&UUQt",
+  "userIdentities": Object {
+    "channels.email.address": "contact@example.com",
+  },
 }
 `;
 
 exports[`Testing snapshot for Cordial's removeContactFromList destination action: default fields, group name 1`] = `
 Object {
-  "email": "user1234",
-  "identifyBy": Array [
-    "email",
-  ],
-  "segment_test-group": false,
+  "anonymousId": "4251ed2f-f91d-4805-8a5b-a8a575439604",
+  "groupId": "group1234",
+  "segmentId": "user1234",
+  "segmentIdKey": "^&UUQt",
+  "userIdentities": Object {
+    "channels.email.address": "contact@example.com",
+  },
 }
 `;

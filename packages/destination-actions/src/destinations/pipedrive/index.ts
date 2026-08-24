@@ -1,6 +1,6 @@
 import createUpdateOrganization from './createUpdateOrganization'
 import createUpdatePerson from './createUpdatePerson'
-import type { DestinationDefinition } from '@segment/actions-core'
+import { defaultValues, DestinationDefinition } from '@segment/actions-core'
 import type { Settings } from './generated-types'
 
 import createUpdateActivity from './createUpdateActivity'
@@ -13,6 +13,7 @@ import createUpdateNote from './createUpdateNote'
 
 const destination: DestinationDefinition<Settings> = {
   name: 'Actions Pipedrive',
+  slug: 'actions-pipedrive',
   mode: 'cloud',
   authentication: {
     scheme: 'custom',
@@ -28,7 +29,7 @@ const destination: DestinationDefinition<Settings> = {
         label: 'API Token',
         description:
           'Pipedrive API token. This is found in Pipedrive in Settings > Personal preferences > API > Your personal API token.',
-        type: 'string',
+        type: 'password',
         // minLength: 20,
         required: true
       },
@@ -77,7 +78,30 @@ const destination: DestinationDefinition<Settings> = {
     createUpdateDeal,
     createUpdateLead,
     createUpdateNote
-  }
+  },
+  presets: [
+    {
+      name: 'Create or Update a Person',
+      subscribe: 'type = "identify"',
+      partnerAction: 'createUpdatePerson',
+      mapping: defaultValues(createUpdatePerson.fields),
+      type: 'automatic'
+    },
+    {
+      name: 'Create or Update an Organization',
+      subscribe: 'type = "group"',
+      partnerAction: 'createUpdateOrganization',
+      mapping: defaultValues(createUpdateOrganization.fields),
+      type: 'automatic'
+    },
+    {
+      name: 'Create or Update an Activity',
+      subscribe: 'type = "track" and event = "Activity Upserted"',
+      partnerAction: 'createUpdateActivity',
+      mapping: defaultValues(createUpdateActivity.fields),
+      type: 'automatic'
+    }
+  ]
 }
 
 export default destination

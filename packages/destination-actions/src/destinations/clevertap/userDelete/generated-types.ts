@@ -2,7 +2,7 @@
 
 export interface Payload {
   /**
-   * Identity
+   * The ID of the profile which you want to delete
    */
   identity: string
 }

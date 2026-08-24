@@ -1,12 +1,12 @@
 import nock from 'nock'
 import { createTestEvent, createTestIntegration } from '@segment/actions-core'
 import Destination from '../index'
-import { API_VERSION } from '../sf-operations'
+import { SALESFORCE_API_VERSION } from '../versioning-info'
 
 const testDestination = createTestIntegration(Destination)
 
 const settings = {
-  instanceUrl: 'https://test.com'
+  instanceUrl: 'https://test.salesforce.com/'
 }
 const auth = {
   refreshToken: 'xyz321',
@@ -16,11 +16,12 @@ const auth = {
 describe('Salesforce', () => {
   describe('Lead', () => {
     it('should create a lead record', async () => {
-      nock(`${settings.instanceUrl}/services/data/${API_VERSION}/sobjects`).post('/Lead').reply(201, {})
+      nock(`${settings.instanceUrl}services/data/${SALESFORCE_API_VERSION}/sobjects`).post('/Lead').reply(201, {})
 
       const event = createTestEvent({
-        event: 'Identify',
-        traits: {
+        type: 'track',
+        event: 'Create Lead',
+        properties: {
           email: 'sponge@seamail.com',
           company: 'Krusty Krab',
           last_name: 'Squarepants'
@@ -34,13 +35,13 @@ describe('Salesforce', () => {
         mapping: {
           operation: 'create',
           email: {
-            '@path': '$.traits.email'
+            '@path': '$.properties.email'
           },
           company: {
-            '@path': '$.traits.company'
+            '@path': '$.properties.company'
           },
           last_name: {
-            '@path': '$.traits.last_name'
+            '@path': '$.properties.last_name'
           }
         }
       })
@@ -69,12 +70,76 @@ describe('Salesforce', () => {
       )
     })
 
-    it('should create a lead record with default mappings', async () => {
-      nock(`${settings.instanceUrl}/services/data/${API_VERSION}/sobjects`).post('/Lead').reply(201, {})
+    it('should delete a lead record given an Id', async () => {
+      nock(`${settings.instanceUrl}services/data/${SALESFORCE_API_VERSION}/sobjects`).delete('/Lead/123').reply(204, {})
 
       const event = createTestEvent({
-        event: 'Identify',
-        traits: {
+        type: 'track',
+        event: 'Delete',
+        userId: '123'
+      })
+
+      const responses = await testDestination.testAction('lead', {
+        event,
+        settings,
+        auth,
+        mapping: {
+          operation: 'delete',
+          traits: {
+            Id: { '@path': '$.userId' }
+          }
+        }
+      })
+
+      expect(responses.length).toBe(1)
+      expect(responses[0].status).toBe(204)
+    })
+
+    it('should delete a lead record given some lookup traits', async () => {
+      const query = encodeURIComponent(`SELECT Id FROM Lead WHERE Email = 'bob@bobsburgers.net'`)
+      nock(`${settings.instanceUrl}services/data/${SALESFORCE_API_VERSION}/query`)
+        .get(`/?q=${query}`)
+        .reply(201, {
+          totalSize: 1,
+          records: [{ Id: 'abc123' }]
+        })
+
+      nock(`${settings.instanceUrl}services/data/${SALESFORCE_API_VERSION}/sobjects`)
+        .delete('/Lead/abc123')
+        .reply(201, {})
+
+      const event = createTestEvent({
+        type: 'track',
+        event: 'Delete',
+        properties: {
+          email: 'bob@bobsburgers.net'
+        }
+      })
+
+      const responses = await testDestination.testAction('lead', {
+        event,
+        settings,
+        auth,
+        mapping: {
+          operation: 'delete',
+          traits: {
+            Email: { '@path': '$.properties.email' }
+          }
+        }
+      })
+
+      expect(responses.length).toBe(2)
+      expect(responses[0].status).toBe(201)
+      expect(responses[1].status).toBe(201)
+    })
+
+    it('should create a lead record with default mappings', async () => {
+      nock(`${settings.instanceUrl}services/data/${SALESFORCE_API_VERSION}/sobjects`).post('/Lead').reply(201, {})
+
+      const event = createTestEvent({
+        type: 'track',
+        event: 'Create Lead',
+        properties: {
           email: 'sponge@seamail.com',
           company: 'Krusty Krab',
           address: {
@@ -83,9 +148,7 @@ describe('Salesforce', () => {
             country: 'The Ocean',
             street: 'Pineapple Ln',
             state: 'Water'
-          }
-        },
-        properties: {
+          },
           last_name: 'Bob',
           first_name: 'Sponge'
         }
@@ -126,11 +189,12 @@ describe('Salesforce', () => {
     })
 
     it('should create a lead record with custom fields', async () => {
-      nock(`${settings.instanceUrl}/services/data/${API_VERSION}/sobjects`).post('/Lead').reply(201, {})
+      nock(`${settings.instanceUrl}services/data/${SALESFORCE_API_VERSION}/sobjects`).post('/Lead').reply(201, {})
 
       const event = createTestEvent({
-        event: 'Identify',
-        traits: {
+        type: 'track',
+        event: 'Create Lead',
+        properties: {
           email: 'sponge@seamail.com',
           company: 'Krusty Krab',
           last_name: 'Squarepants'
@@ -144,13 +208,13 @@ describe('Salesforce', () => {
         mapping: {
           operation: 'create',
           email: {
-            '@path': '$.traits.email'
+            '@path': '$.properties.email'
           },
           company: {
-            '@path': '$.traits.company'
+            '@path': '$.properties.company'
           },
           last_name: {
-            '@path': '$.traits.last_name'
+            '@path': '$.properties.last_name'
           },
           customFields: {
             A: '1',
@@ -186,8 +250,9 @@ describe('Salesforce', () => {
 
     it('should update a lead record', async () => {
       const event = createTestEvent({
-        event: 'Identify',
-        traits: {
+        type: 'track',
+        event: 'Update Lead',
+        properties: {
           email: 'sponge@seamail.com',
           company: 'Krusty Krab LLC',
           last_name: 'Squarepants',
@@ -199,15 +264,18 @@ describe('Salesforce', () => {
         }
       })
 
-      nock(`${settings.instanceUrl}/services/data/${API_VERSION}/query`)
-        .get(`/?q=SELECT Id FROM Lead WHERE company = 'Krusty Krab'`)
+      const query = encodeURIComponent(`SELECT Id FROM Lead WHERE company = 'Krusty Krab'`)
+      nock(`${settings.instanceUrl}services/data/${SALESFORCE_API_VERSION}/query`)
+        .get(`/?q=${query}`)
         .reply(201, {
           Id: 'abc123',
           totalSize: 1,
           records: [{ Id: '123456' }]
         })
 
-      nock(`${settings.instanceUrl}/services/data/${API_VERSION}/sobjects`).patch('/Lead/123456').reply(201, {})
+      nock(`${settings.instanceUrl}services/data/${SALESFORCE_API_VERSION}/sobjects`)
+        .patch('/Lead/123456')
+        .reply(201, {})
 
       const responses = await testDestination.testAction('lead', {
         event,
@@ -219,22 +287,22 @@ describe('Salesforce', () => {
             company: 'Krusty Krab'
           },
           email: {
-            '@path': '$.traits.email'
+            '@path': '$.properties.email'
           },
           company: {
-            '@path': '$.traits.company'
+            '@path': '$.properties.company'
           },
           last_name: {
-            '@path': '$.traits.last_name'
+            '@path': '$.properties.last_name'
           },
           city: {
-            '@path': '$.traits.address.city'
+            '@path': '$.properties.address.city'
           },
           postal_code: {
-            '@path': '$.traits.address.postal_code'
+            '@path': '$.properties.address.postal_code'
           },
           street: {
-            '@path': '$.traits.address.street'
+            '@path': '$.properties.address.street'
           }
         }
       })
@@ -263,8 +331,9 @@ describe('Salesforce', () => {
 
     it('should upsert an existing record', async () => {
       const event = createTestEvent({
-        event: 'Identify',
-        traits: {
+        type: 'track',
+        event: 'Upsert Lead',
+        properties: {
           email: 'sponge@seamail.com',
           company: 'Krusty Krab LLC',
           last_name: 'Squarepants',
@@ -276,15 +345,18 @@ describe('Salesforce', () => {
         }
       })
 
-      nock(`${settings.instanceUrl}/services/data/${API_VERSION}/query`)
-        .get(`/?q=SELECT Id FROM Lead WHERE company = 'Krusty Krab'`)
+      const query = encodeURIComponent(`SELECT Id FROM Lead WHERE company = 'Krusty Krab'`)
+      nock(`${settings.instanceUrl}services/data/${SALESFORCE_API_VERSION}/query`)
+        .get(`/?q=${query}`)
         .reply(201, {
           Id: 'abc123',
           totalSize: 1,
           records: [{ Id: '123456' }]
         })
 
-      nock(`${settings.instanceUrl}/services/data/${API_VERSION}/sobjects`).patch('/Lead/123456').reply(201, {})
+      nock(`${settings.instanceUrl}services/data/${SALESFORCE_API_VERSION}/sobjects`)
+        .patch('/Lead/123456')
+        .reply(201, {})
 
       const responses = await testDestination.testAction('lead', {
         event,
@@ -296,22 +368,22 @@ describe('Salesforce', () => {
             company: 'Krusty Krab'
           },
           email: {
-            '@path': '$.traits.email'
+            '@path': '$.properties.email'
           },
           company: {
-            '@path': '$.traits.company'
+            '@path': '$.properties.company'
           },
           last_name: {
-            '@path': '$.traits.last_name'
+            '@path': '$.properties.last_name'
           },
           city: {
-            '@path': '$.traits.address.city'
+            '@path': '$.properties.address.city'
           },
           postal_code: {
-            '@path': '$.traits.address.postal_code'
+            '@path': '$.properties.address.postal_code'
           },
           street: {
-            '@path': '$.traits.address.street'
+            '@path': '$.properties.address.street'
           }
         }
       })
@@ -340,8 +412,9 @@ describe('Salesforce', () => {
 
     it('should upsert a nonexistent record', async () => {
       const event = createTestEvent({
-        event: 'Identify',
-        traits: {
+        type: 'track',
+        event: 'Upsert Lead',
+        properties: {
           email: 'sponge@seamail.com',
           company: 'Krusty Krab LLC',
           last_name: 'Squarepants',
@@ -353,14 +426,13 @@ describe('Salesforce', () => {
         }
       })
 
-      nock(`${settings.instanceUrl}/services/data/${API_VERSION}/query`)
-        .get(`/?q=SELECT Id FROM Lead WHERE company = 'Krusty Krab'`)
-        .reply(201, {
-          Id: 'abc123',
-          totalSize: 0
-        })
+      const query = encodeURIComponent(`SELECT Id FROM Lead WHERE company = 'Krusty Krab'`)
+      nock(`${settings.instanceUrl}services/data/${SALESFORCE_API_VERSION}/query`).get(`/?q=${query}`).reply(201, {
+        Id: 'abc123',
+        totalSize: 0
+      })
 
-      nock(`${settings.instanceUrl}/services/data/${API_VERSION}/sobjects`).post('/Lead').reply(201, {})
+      nock(`${settings.instanceUrl}services/data/${SALESFORCE_API_VERSION}/sobjects`).post('/Lead').reply(201, {})
 
       const responses = await testDestination.testAction('lead', {
         event,
@@ -372,22 +444,22 @@ describe('Salesforce', () => {
             company: 'Krusty Krab'
           },
           email: {
-            '@path': '$.traits.email'
+            '@path': '$.properties.email'
           },
           company: {
-            '@path': '$.traits.company'
+            '@path': '$.properties.company'
           },
           last_name: {
-            '@path': '$.traits.last_name'
+            '@path': '$.properties.last_name'
           },
           city: {
-            '@path': '$.traits.address.city'
+            '@path': '$.properties.address.city'
           },
           postal_code: {
-            '@path': '$.traits.address.postal_code'
+            '@path': '$.properties.address.postal_code'
           },
           street: {
-            '@path': '$.traits.address.street'
+            '@path': '$.properties.address.street'
           }
         }
       })

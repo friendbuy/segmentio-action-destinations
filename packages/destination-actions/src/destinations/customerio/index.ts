@@ -1,7 +1,17 @@
 import { defaultValues } from '@segment/actions-core'
 import createUpdateDevice from './createUpdateDevice'
-import deleteDevice from './deleteDevice'
+import createUpdateObject from './createUpdateObject'
 import createUpdatePerson from './createUpdatePerson'
+import deleteDevice from './deleteDevice'
+import deleteRelationship from './deleteRelationship'
+import deleteObject from './deleteObject'
+import deletePerson from './deletePerson'
+import mergePeople from './mergePeople'
+import reportDeliveryEvent from './reportDeliveryEvent'
+import reportContentEvent from './reportContentEvent'
+import { CUSTOMERIO_CUSTOMERS_API_VERSION } from './versioning-info'
+import suppressPerson from './suppressPerson'
+import unsuppressPerson from './unsuppressPerson'
 import trackEvent from './trackEvent'
 import trackPageView from './trackPageView'
 import trackScreenView from './trackScreenView'
@@ -11,6 +21,7 @@ import { AccountRegion, trackApiEndpoint } from './utils'
 
 const destination: DestinationDefinition<Settings> = {
   name: 'Actions Customerio',
+  slug: 'actions-customerio',
   mode: 'cloud',
   authentication: {
     scheme: 'basic',
@@ -19,14 +30,14 @@ const destination: DestinationDefinition<Settings> = {
         description:
           'Customer.io site ID. This can be found on your [API Credentials page](https://fly.customer.io/settings/api_credentials).',
         label: 'Site ID',
-        type: 'string',
+        type: 'password',
         required: true
       },
       apiKey: {
         description:
           'Customer.io API key. This can be found on your [API Credentials page](https://fly.customer.io/settings/api_credentials).',
         label: 'API Key',
-        type: 'string',
+        type: 'password',
         required: true
       },
       accountRegion: {
@@ -52,10 +63,19 @@ const destination: DestinationDefinition<Settings> = {
   actions: {
     createUpdateDevice,
     deleteDevice,
+    deleteRelationship,
+    deletePerson,
+    deleteObject,
     createUpdatePerson,
     trackEvent,
     trackPageView,
-    trackScreenView
+    trackScreenView,
+    createUpdateObject,
+    mergePeople,
+    suppressPerson,
+    unsuppressPerson,
+    reportDeliveryEvent,
+    reportContentEvent
   },
 
   presets: [
@@ -63,45 +83,203 @@ const destination: DestinationDefinition<Settings> = {
       name: 'Create or Update Person',
       subscribe: 'type = "identify"',
       partnerAction: 'createUpdatePerson',
-      mapping: defaultValues(createUpdatePerson.fields)
+      mapping: defaultValues(createUpdatePerson.fields),
+      type: 'automatic'
     },
     {
       name: 'Create or Update Device',
-      subscribe: 'event = "Application Installed" or event = "Application Opened"',
+      subscribe: `
+        event = "Application Installed"
+        or event = "Application Opened"
+        or event = "Device Created or Updated"
+      `,
       partnerAction: 'createUpdateDevice',
-      mapping: defaultValues(createUpdateDevice.fields)
+      mapping: defaultValues(createUpdateDevice.fields),
+      type: 'automatic'
     },
     {
       name: 'Delete Device',
-      subscribe: 'event = "Application Uninstalled"',
+      subscribe: 'event = "Application Uninstalled" or event = "Device Deleted"',
       partnerAction: 'deleteDevice',
-      mapping: defaultValues(deleteDevice.fields)
+      mapping: defaultValues(deleteDevice.fields),
+      type: 'automatic'
+    },
+    {
+      name: 'Delete Relationship',
+      subscribe: 'event = "Relationship Deleted"',
+      partnerAction: 'deleteRelationship',
+      mapping: defaultValues(deleteRelationship.fields),
+      type: 'automatic'
+    },
+    {
+      name: 'Delete Person',
+      subscribe: 'event = "User Deleted"',
+      partnerAction: 'deletePerson',
+      mapping: defaultValues(deletePerson.fields),
+      type: 'automatic'
+    },
+    {
+      name: 'Delete Object',
+      subscribe: 'event = "Object Deleted"',
+      partnerAction: 'deleteObject',
+      mapping: defaultValues(deleteObject.fields),
+      type: 'automatic'
     },
     {
       name: 'Track Event',
-      subscribe: 'type = "track"',
+      subscribe: `
+        type = "track"
+        and event != "Application Installed"
+        and event != "Application Opened"
+        and event != "Application Uninstalled"
+        and event != "Device Created or Updated"
+        and event != "Device Deleted"
+        and event != "Relationship Deleted"
+        and event != "User Deleted"
+        and event != "User Suppressed"
+        and event != "User Unsuppressed"
+        and event != "Object Deleted"
+        and event != "Report Delivery Event"
+        and event != "Report Content Event"
+      `,
       partnerAction: 'trackEvent',
-      mapping: defaultValues(trackEvent.fields)
+      mapping: defaultValues(trackEvent.fields),
+      type: 'automatic'
     },
     {
       name: 'Track Page View',
       subscribe: 'type = "page"',
       partnerAction: 'trackPageView',
-      mapping: defaultValues(trackPageView.fields)
+      mapping: defaultValues(trackPageView.fields),
+      type: 'automatic'
     },
     {
       name: 'Track Screen View',
       subscribe: 'type = "screen"',
       partnerAction: 'trackScreenView',
-      mapping: defaultValues(trackScreenView.fields)
+      mapping: defaultValues(trackScreenView.fields),
+      type: 'automatic'
+    },
+    {
+      name: 'Create or Update Object',
+      subscribe: 'type = "group"',
+      partnerAction: 'createUpdateObject',
+      mapping: defaultValues(createUpdateObject.fields),
+      type: 'automatic'
+    },
+    {
+      name: 'Merge People',
+      subscribe: 'type = "alias"',
+      partnerAction: 'mergePeople',
+      mapping: defaultValues(mergePeople.fields),
+      type: 'automatic'
+    },
+    {
+      name: 'Suppress Person',
+      subscribe: 'event = "User Suppressed"',
+      partnerAction: 'suppressPerson',
+      mapping: defaultValues(suppressPerson.fields),
+      type: 'automatic'
+    },
+    {
+      name: 'Unsuppress Person',
+      subscribe: 'event = "User Unsuppressed"',
+      partnerAction: 'unsuppressPerson',
+      mapping: defaultValues(unsuppressPerson.fields),
+      type: 'automatic'
+    },
+    {
+      name: 'Report Delivery Event',
+      subscribe: 'event = "Report Delivery Event"',
+      partnerAction: 'reportDeliveryEvent',
+      mapping: defaultValues(reportDeliveryEvent.fields),
+      type: 'automatic'
+    },
+    {
+      name: 'Report Content Event',
+      subscribe: 'event = "Report Content Event"',
+      partnerAction: 'reportContentEvent',
+      mapping: defaultValues(reportContentEvent.fields),
+      type: 'automatic'
+    },
+    {
+      name: 'Associated Entity Added',
+      partnerAction: 'trackEvent',
+      mapping: {
+        ...defaultValues(trackEvent.fields),
+        data: {
+          '@path': '$.properties'
+        }
+      },
+      type: 'specificEvent',
+      eventSlug: 'warehouse_entity_added_track'
+    },
+    {
+      name: 'Associated Entity Removed',
+      partnerAction: 'trackEvent',
+      mapping: {
+        ...defaultValues(trackEvent.fields),
+        data: {
+          '@path': '$.properties'
+        }
+      },
+      type: 'specificEvent',
+      eventSlug: 'warehouse_entity_removed_track'
+    },
+    {
+      name: 'Entities Audience Entered',
+      partnerAction: 'trackEvent',
+      mapping: {
+        ...defaultValues(trackEvent.fields),
+        data: {
+          '@path': '$.properties'
+        }
+      },
+      type: 'specificEvent',
+      eventSlug: 'warehouse_audience_entered_track'
+    },
+    {
+      name: 'Entities Exited',
+      partnerAction: 'trackEvent',
+      mapping: {
+        ...defaultValues(trackEvent.fields),
+        data: {
+          '@path': '$.properties'
+        }
+      },
+      type: 'specificEvent',
+      eventSlug: 'warehouse_audience_exited_track'
+    },
+    {
+      name: 'Entities Audience Membership Changed',
+      partnerAction: 'createUpdatePerson',
+      mapping: {
+        ...defaultValues(createUpdatePerson.fields),
+        custom_attributes: {
+          '@path': '$.traits'
+        }
+      },
+      type: 'specificEvent',
+      eventSlug: 'warehouse_audience_membership_changed_identify'
+    },
+    {
+      name: 'Journeys Step Transition Track',
+      partnerAction: 'trackEvent',
+      mapping: {
+        ...defaultValues(trackEvent.fields),
+        data: {
+          '@path': '$.properties'
+        }
+      },
+      type: 'specificEvent',
+      eventSlug: 'journeys_step_entered_track'
     }
   ],
 
   onDelete(request, { settings, payload }) {
-    const { accountRegion } = settings
     const { userId } = payload
 
-    const url = `${trackApiEndpoint(accountRegion)}/api/v1/customers/${userId}`
+    const url = `${trackApiEndpoint(settings)}/api/${CUSTOMERIO_CUSTOMERS_API_VERSION}/customers/${userId}`
 
     return request(url, {
       method: 'DELETE'

@@ -1,31 +1,79 @@
+<p align="center"><a href="https://segment.com"><img src="https://github-production-user-asset-6210df.s3.amazonaws.com/316711/254403783-df7b9cdd-1e45-48a8-a255-e1cc087e2196.svg" width="100"/></a></p>
+
 # Action Destinations
 
-Action Destinations are a way to build streaming destinations on Segment. To begin, follow the instructions in Get Started below.
+Action Destinations are the new way to build streaming destinations on Segment.
 
-Fore more detailed instruction, see the following READMEs:
+Action Destinations were [launched in December 2021](https://segment.com/blog/introducing-destination-actions/) to enable customers with a customizable framework to map Segment event sources to their favorite 3rd party tools like Google Analytics.
 
+This repository contains the Action Destination Definitions as well as a CLI to generate the scaffolding for new destinations and run unit tests. If you'd like to contribute, please review the [Contributing Guide](./CONTRIBUTING.md).
+
+To begin, follow the instructions in Get Started below.
+
+For more detailed instruction, see the following READMEs:
+
+- [Contributing Document](./CONTRIBUTING.md)
 - [Create a Destination Action](./docs/create.md)
+- [Build & Test Cloud Destinations](./docs/testing.md)
 - [Troubleshooting](./docs/testing.md)
 - [Authentication](./docs/authentication.md)
 - [Mapping Kit](./packages/core/src/mapping-kit/README.md)
 - [Destination Kit](./packages/core/src/destination-kit/README.md)
+- [Error Handling](./docs/error-handling.md)
 
-Table of Contents:
+## Table of Contents:
 
+- [Generate a Destination with Claude Code](#generate-a-destination-with-claude-code)
 - [Get Started](#get-started)
 - [Actions CLI](#actions-cli)
 - [Example Destination](#example-destination)
 - [Input Fields](#input-fields)
 - [Default Values](#default-values)
+- [Presets](#presets)
 - [perform function](#the-perform-function)
 - [Batching Requests](#batching-requests)
+- [Parsing MultiStatus Responses](#parsing-multistatus-responses)
+- [Action Hooks](#action-hooks)
 - [HTTP Requests](#http-requests)
+- [Support](#support)
+
+## Generate a Destination with Claude Code
+
+If you use [Claude Code](https://claude.com/claude-code), this repo ships skills that scaffold a full destination for you — from API docs to working code and tests.
+
+The simplest way is the one-command pipeline. Just run:
+
+```
+/orchestrate <Destination Name>
+```
+
+Then provide your **API source** (a docs URL, an OpenAPI spec, or a PRD) when prompted. It walks through every step — analyzing the API, mapping actions to endpoints, writing the code, and generating tests — pausing for your review along the way.
+
+Prefer to run one step at a time? These skills also work on their own:
+
+| Command                 | What it does                                    |
+| ----------------------- | ----------------------------------------------- |
+| `/refined-actions`      | Turn a PRD or API docs into a list of actions   |
+| `/endpoint-mapping`     | Map those actions to API endpoints and fields   |
+| `/spec-generator`       | Produce a full destination spec document        |
+| `/generate-destination` | Generate the destination code, types, and tests |
+| `/test-destination-e2e` | Generate a Jest e2e test suite that runs against a local serve server |
+
+📖 See [`.claude/skills/README.md`](./.claude/skills/README.md) and [`.claude/skills/QUICK_START.md`](./.claude/skills/QUICK_START.md) for details.
+
+> These skills accelerate the boilerplate — always review the generated code and follow the [Contributing Guide](./CONTRIBUTING.md) before opening a PR.
 
 ## Get started
 
 ### Local development
 
-This is a monorepo with multiple packages leveraging [`lerna`](https://github.com/lerna/lerna) with [Yarn Workspaces](https://classic.yarnpkg.com/en/docs/workspaces):
+This is a monorepo with multiple packages leveraging:
+
+- [`lerna`](https://github.com/lerna/lerna) for publishing
+- [`nx`](https://nx.dev) for dependency-tree aware building, linting, testing, and caching (migration away from `lerna` in progress!).
+- [Yarn Workspaces](https://classic.yarnpkg.com/en/docs/workspaces) for package symlinking and hoisting.
+
+Structure:
 
 - `packages/ajv-human-errors` - a wrapper around [AJV](https://ajv.js.org/) errors to produce more friendly validation messages
 - `packages/browser-destinations` - destination definitions that run on device via Analytics 2.0
@@ -39,7 +87,7 @@ This is a monorepo with multiple packages leveraging [`lerna`](https://github.co
 You'll need to have some tools installed locally to build and test action destinations.
 
 - Yarn 1.x
-- Node 14.17 (latest LTS, we recommand using [`nvm`](https://github.com/nvm-sh/nvm) for managing Node versions)
+- Node 18.17 (latest LTS, we recommand using [`nvm`](https://github.com/nvm-sh/nvm) for managing Node versions)
 
 If you are a Segment employee you can directly `git clone` the repository locally. Otherwise you'll want to fork this repository for your organization to submit Pull Requests against the main Segment repository. Once you've got a fork, you can `git clone` that locally.
 
@@ -51,12 +99,19 @@ cd action-destinations
 npm login
 yarn login
 
-# Requires node 14.17, optionally: nvm use 14.17
+# Requires node 18.17.1, optionally: nvm use 18.17.1
 yarn --ignore-optional
-yarn bootstrap
+yarn install
+yarn build
 
-# Run unit tests to ensure things are working! All tests should pass :)
+# Run unit tests to ensure things are working! For partners who don't have access to internal packages, you can run:
+yarn test-partners
+
+# For segment employees, you can run:
 yarn test
+
+# to reset all caches and rebuild again
+yarn clean-build
 ```
 
 ### Actions CLI
@@ -81,6 +136,8 @@ In order to run the CLI (`./bin/run`), your current working directory needs to b
 ```
 
 For specific information about each CLI command, please refer to this [README](https://github.com/segmentio/action-destinations/tree/main/packages/cli).
+
+For instructions on how to create a new integration, see the [Create a new Destination Action](./docs/create.md) docs.
 
 #### Troubleshooting CLI
 
@@ -159,7 +216,7 @@ packages/destination-actions/src/destinations/slack
 
 The main definition of your Destination will look something like this, and is what your index.ts should export as the default export:
 
-```
+```js
 const destination = {
   name: 'Example Destination',
 
@@ -185,8 +242,7 @@ For each action or authentication scheme you can define a collection of inputs a
 
 Input fields have various properties that help define how they are rendered, how their values are parsed and more. Here’s an example:
 
-```
-
+```js
 const destination = {
   // ...other properties
   actions: {
@@ -215,8 +271,7 @@ const destination = {
 
 Here's the full interface that input fields allow:
 
-```
-
+```ts
 interface InputField {
   /** A short, human-friendly label for the field */
   label: string
@@ -243,7 +298,7 @@ interface InputField {
   dynamic?: boolean
 
   /** Whether or not the field is required */
-  required?: boolean
+  required?: boolean | DependsOnConditions
 
   /**
    * Optional definition for the properties of `type: 'object'` fields
@@ -281,8 +336,7 @@ You can set default values for fields. These defaults are not used at run-time, 
 
 Default values can be literal values that match the `type` of the field (e.g. a literal string: ` "``hello``" `) or they can be mapping-kit directives just like the values from Segment’s rich input in the app. It’s likely that you’ll want to use directives to the default value. Here are some examples:
 
-```
-
+```js
 const destination = {
   // ...other properties
   actions: {
@@ -291,16 +345,41 @@ const destination = {
       fields: {
         name: {
           label: 'Name',
-          description: 'The person\'s name',
+          description: "The person's name",
           type: 'string',
           default: { '@path': '$.traits.name' },
           required: true
         },
         email: {
           label: 'Email',
-          description: 'The person\'s email address',
+          description: "The person's email address",
           type: 'string',
           default: { '@path': '$.properties.email_address' }
+        },
+        // an object field example. Defaults should be specified on the top level.
+        value: {
+          label: 'Conversion Value',
+          description: 'The monetary value for a conversion. This is an object with shape: {"currencyCode": USD", "amount": "100"}'
+          type: 'object'
+          default: {
+            currencyCode: { '@path': '$.properties.currency' },
+            amount: { '@path': '$.properties.revenue' }
+          },
+          properties: {
+            currencyCode: {
+              label: 'Currency Code',
+              type: 'string',
+              required: true,
+              description: 'ISO format'
+            },
+            amount: {
+              label: 'Amount',
+              type: 'string',
+              required: true,
+              description: 'Value of the conversion in decimal string. Can be dynamically set up or have a fixed value.'
+            }
+          }
+          }
         }
       }
     }
@@ -310,16 +389,363 @@ const destination = {
 
 In addition to default values for input fields, you can also specify the defaultSubscription for a given action – this is the FQL query that will be automatically populated when a customer configures a new subscription triggering a given action.
 
+## Handling Password and Secret Fields with type: password
+
+When working with sensitive data such as API keys, tokens, passwords, or other credentials, it's critical to properly mark these fields with `type: 'password'`. This ensures proper security handling across Segment's infrastructure, including:
+
+- **UI Security**: Fields are automatically obfuscated in the Segment App interface, as well as through the public API for security purposes.
+- **Git Sync Integration**: Properly marked password fields are excluded from git sync operations to prevent secrets from being committed to version control
+
+### Identifying Fields That Should Use type: 'password'
+
+Fields containing any of the following should always use `type: 'password'`:
+
+- **API Keys**: Any field containing API keys, access keys, or similar authentication tokens
+- **Passwords**: User passwords, service account passwords, or any authentication credentials
+- **Tokens**: Access tokens, refresh tokens, bearer tokens, OAuth tokens, or JWT tokens
+- **Secrets**: Client secrets, shared secrets, or any confidential authentication data
+- **Authorization Codes**: OAuth authorization codes or similar one-time codes
+- **Authentication Data**: Any field used for authentication or authorization purposes
+
+### Keywords to Watch For
+
+When defining field names or descriptions, look for these patterns that often indicate sensitive data:
+
+- Field names containing: `key`, `token`, `secret`, `password`, `code`, `auth`, `credential`, `bearer`
+- Descriptions mentioning: authentication, authorization, credentials, sensitive, confidential
+
+### Example Implementation
+
+```js
+const destination = {
+  authentication: {
+    scheme: 'custom',
+    fields: {
+      apiKey: {
+        label: 'API Key',
+        description: 'Your API key for authentication',
+        type: 'password', // ✅ Correct: API keys should be password type
+        required: true
+      },
+      clientSecret: {
+        label: 'Client Secret',
+        description: 'OAuth client secret',
+        type: 'password', // ✅ Correct: Client secrets should be password type
+        required: true
+      },
+      subdomain: {
+        label: 'Subdomain',
+        description: 'Your account subdomain',
+        type: 'string', // ✅ Correct: Subdomains are not sensitive
+        required: true
+      }
+    }
+  }
+}
+```
+
+## Required Fields
+
+You may configure a field to either be always required, not required, or conditionally required. Validation for required fields is performed both when a user is configuring a mapping in the UI and when an event payload is delivered through a `perform` block.
+
+**An example of each possible value for `required`**
+
+```js
+const destination = {
+  actions: {
+    readmeAction: {
+      fields: {
+        operation: {
+          label: 'An operation for the readme action',
+          required: true // This field is always required and any payloads omitting it will fail
+        },
+        creationName: {
+          label: "The name of the resource to create, required when operation = 'create'",
+          required: {
+            // This field is required only when the 'operation' field has the value 'create'
+            match: 'all',
+            conditions: [
+              {
+                fieldKey: 'operation',
+                operator: 'is',
+                value: 'create'
+              }
+            ]
+          }
+        },
+        email: {
+          label: 'The customer email',
+          required: false // This field is not required. This is the same as not including the 'required' property at all
+        },
+        userIdentifiers: {
+          phone: {
+            label: 'The customer phone number',
+            required: {
+              // If email is not provided then a phone number is required
+              conditions: [{ fieldKey: 'email', operator: 'is', value: undefined }]
+            }
+          },
+          countryCode: {
+            label: 'The country code for the customer phone number',
+            required: {
+              // If a userIdentifiers.phone is provided then the country code is also required
+              conditions: [
+                {
+                  fieldKey: 'userIdentifiers.phone', // Dot notation may be used to address object fields.
+                  operator: 'is_not',
+                  value: undefined
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+**Examples of valid and invalid payloads for the fields above**
+
+```json
+// This payload is valid since the only required field, 'operation', is defined.
+{
+  "operation": "update",
+  "email": "read@me.com"
+}
+```
+
+```json
+// This payload is invalid since 'creationName' is required because 'operation' is 'create'
+{
+  "operation": "create",
+  "email": "read@me.com"
+}
+// This error will be thrown:
+"message": "The root value is missing the required field 'creationName'. The root value must match \"then\" schema."
+```
+
+```json
+// This payload is valid since the two required fields, 'operation' and 'creationName' are defined.
+{
+  "operation": "create",
+  "creationName": "readme",
+  "email": "read@me.com"
+}
+```
+
+```json
+// This payload is invalid since 'phone' is required when 'email' is missing.
+{
+  "operation": "update",
+}
+// This error will be thrown:
+"message": "The root value is missing the required field 'phone'. The root value must match \"then\" schema."
+```
+
+```json
+// This payload is invalid since 'countryCode' is required when 'phone' is defined
+{
+  "operation": "update",
+  "userIdentifiers": { "phone": "619-555-5555" }
+}
+// This error will be thrown:
+"message": "The root value is missing the required field 'countryCode'. The root value must match \"then\" schema."
+```
+
+```json
+// This payload is valid since all conditionally required fields are included
+{
+  "operation": "update",
+  "userIdentifiers": {
+    "phone": "619-555-5555",
+    "countryCode": "+1"
+  }
+}
+```
+
+## Dynamic Fields
+
+You can setup a field which dynamically fetches inputs from your destination. These dynamic fields can be used to populate a dropdown menu of options for your users to select.
+
+```js
+const destination = {
+  // ...other properties
+  actions: {
+    doSomething: {
+      // ...
+      fields: {
+        objectName: {
+          label: 'Name',
+          description: "The name of the object to update.",
+          type: 'string',
+          required: true,
+          dynamic: true
+        }
+      },
+      dynamicFields: {
+        objectName = async (): Promise<DynamicFieldResponse> => {
+          try {
+            const result = await this.request<ObjectsResponseData>(`http://<destination>/objects`,
+            {
+              method: 'get',
+              skipResponseCloning: true // This is useful if you expect a large response.
+            })
+
+            const fields = result.data.objects.filter((field) => {
+              return field.createable === true
+            })
+
+            const choices = fields.map((field) => {
+              return { value: field.name, label: field.label }
+            })
+
+            return {
+              choices: choices,
+              nextPage: '2'
+            }
+          } catch (err) {
+            return {
+              choices: [],
+              nextPage: '',
+              error: {
+                message: (err as ResponseError).response?.data[0]?.message ?? 'Unknown error',
+                code: (err as ResponseError).response?.data[0]?.errorCode ?? 'Unknown error'
+              }
+            }
+          }
+  }
+      }
+    }
+  }
+}
+```
+
+## Conditional Fields
+
+Conditional fields enable a field only when a predefined list of conditions are met while the user steps through the mapping editor. This is useful when showing a field becomes unnecessary based on the value of some other field.
+
+For example, in the Salesforce destination the 'Bulk Upsert External ID' field is only relevant when the user has selected 'Operation: Upsert' and 'Enable Batching: True'. In all other cases the field will be hidden to streamline UX while setting up the mapping.
+
+To define a conditional field, the `InputField` should implement the `depends_on` property. This property lives in destination-kit and the definition can be found here: [`packages/core/src/destination-kit/types.ts`](https://github.com/segmentio/action-destinations/blame/854a9e154547a54a7323dc3d4bf95bc31d31433a/packages/core/src/destination-kit/types.ts).
+
+The above Salesforce use case is defined like this:
+
+```js
+export const bulkUpsertExternalId: InputField = {
+  // other properties skipped for brevity ...
+  depends_on: {
+    match: 'all', // match is optional and can be either 'any' or 'all'. If left undefiend it defaults to matching all conditions.
+    conditions: [
+      {
+        fieldKey: 'operation', // field keys must match some other field in the same action
+        operator: 'is',
+        value: 'upsert'
+      },
+      {
+        fieldKey: 'enable_batching',
+        operator: 'is',
+        value: true
+      }
+    ]
+  }
+}
+```
+
+Lists of values can also be included as match conditions. For example:
+
+```js
+export const recordMatcherOperator: InputField = {
+  // ...
+  depends_on: {
+    // This is interpreted as "show recordMatcherOperator if operation is (update or upsert or delete)"
+    conditions: [
+      {
+        fieldKey: 'operation',
+        operator: 'is',
+        value: ['update', 'upsert', 'delete']
+      }
+    ]
+  }
+}
+```
+
+The value can be undefined, which allows matching against empty fields or fields which contain any value. For example:
+
+```js
+export const name: InputField = {
+  // ...
+  depends_on: {
+    match: 'all',
+    // The name field will be shown only if conversionRuleId is not empty.
+    conditions: [
+      {
+        fieldKey: 'conversionRuleId',
+        operator: 'is_not',
+        value: undefined
+      }
+    ]
+  }
+}
+```
+
+## Presets
+
+Presets are pre-built use cases to enable customers to get started quickly with an action destination. They include everything needed to generate a valid subscription.
+
+There are two types of Presets: `automatic` and `specificEvent`.
+
+Automatic presets generate subscriptions automatically when an action destination is connected to a _non-Engage_ source. Automatic presets are also available for the customer to choose to generate a subscription at any point in the destination's lifecycle. If you are not sure which type of preset to choose, this is probably the right type.
+
+[Experimental] SpecificEvent presets are meant to be used with destinations connected to Segment Engage Sources. A subscription will be created from the preset when a _specific action_ is taken by the customer, as specified by the `eventSlug`. If you think your destination should include a specific event preset, please reach out to us.
+
+```js
+const destination = {
+  // ...other properties
+  presets: [
+    // automatic preset
+    {
+      name: 'Track Event',
+      subscribe: 'type = "track"',
+      partnerAction: 'track',
+      mapping: defaultValues(track.fields),
+      type: 'automatic'
+    },
+    // specific event preset
+    {
+      name: 'Associated Entity Added',
+      partnerAction: 'track',
+      mapping: defaultValues(track.fields),
+      type: 'specificEvent'
+      slug: 'warehouse_entity_added_track'
+    },
+  ],
+}
+```
+
 ## The `perform` function
 
 The `perform` function defines what the action actually does. All logic and request handling happens here. Every action MUST have a `perform` function defined.
 
-By the time the actions runtime invokes your action’s perform, payloads have already been resolved based on the customer’s configuration, validated against the schema, and can be expected to match the types provided in your `perform` function. You’ll get compile-time type-safety for how you access anything in the `data.payload` (the 2nd argument of the perform).
+By the time the actions runtime invokes your action’s perform, payloads have already been resolved based on the customer’s configuration, validated against the schema, and can be expected to match the types provided in your `perform` function.
+
+The `perform` method accepts two arguments, (1) the request client instance (extended with your destination's `extendRequest`, and (2) the data bundle. The data bundle includes the following fields:
+
+- `payload` - The transformed input data, based on `mapping` + `event` (or `events` if batched). You’ll get compile-time type-safety for how you access anything in the `data.payload`.
+- `settings` - The global destination settings.
+- `auth` - The data needed in OAuth requests. This is useful if fetching an updated OAuth `access_token` using a `refresh_token`. The `refresh_token` is available in `auth.refreshToken`.
+- `features` - The features available in the request based on the customer's sourceID. Features can only be enabled and/or used by internal Twilio/Segment employees. Features cannot be used for Partner builds.
+- `statsContext` - An object, containing a `statsClient` and `tags`. Stats can only be used by internal Twilio/Segment employees. Stats cannot be used for Partner builds.
+- `personasContext` - An object containing Personas/Engage metadata extracted from the event's `context.personas` field. Available fields: `computation_key`, `computation_id`, `namespace`, and any additional keys present on the personas context. This is populated automatically by the runtime when the event originates from a Personas/Engage source — no field mapping required. For non-Personas events the value is `undefined`. For internal Twilio/Segment use only.
+- `logger` - Logger can only be used by internal Twilio/Segment employees. Logger cannot be used for Partner builds.
+- `engageDestinationCache` - EngageDestinationCache can only be used by internal Twilio/Segment employees. EngageDestinationCache should not be used for Partner builds.
+- `transactionContext` - An object, containing transaction variables and a method to update transaction variables which are required for few segment developed actions. Transaction Context cannot be used for Partner builds.
+- `stateContext` - An object, containing context variables and a method to get and set context variables which are required for few segment developed actions. State Context cannot be used for Partner builds.
+- `subscriptionMetadata` - an object, containing variables which identify the instance of a Destination and Action as well as other metadata. Subscription Metadata cannot be used for Partner builds.
 
 A basic example:
 
-```
-
+```js
 const destination = {
   actions: {
     someAction: {
@@ -334,8 +760,8 @@ const destination = {
       },
       // `perform` takes two arguments:
       // 1. the request client instance (extended with your destination's `extendRequest`
-      // 2. the data bundle which includes `settings` for top-level authentication fields and the `payload` which contains all the validated, resolved fields expected by the action
-      perform: (request, data) => {
+      // 2. the data bundle (destructured below)
+      perform: (request, { payload, settings, auth, features, statsContext }) => {
         return request('https://example.com', {
           headers: { Authorization: `Bearer ${data.settings.api_key}` },
           json: data.payload
@@ -350,17 +776,37 @@ The perform method will be invoked once for every event subscription that trigge
 
 ## Batching Requests
 
-Sometimes your customers have a lot of events, and your API supports a more efficient way to receive and process those large sets of data. We have early, experimental support for batching.
+Sometimes your customers have a lot of events, and your API supports a more efficient way to receive and process those large sets of data.
 
 You can implement an _additional_ perform method named `performBatch` in the action definition, alongside the `perform` method. The method signature looks like identical to `perform` except the `payload` is an array of data, where each item is an object matching your action’s field schema:
 
-```
-
+```js
 function performBatch(request, { settings, payload }) {
   return request('https://example.com/batch', {
     // `payload` is an array of objects, each matching your action's field definition
     json: payload
   })
+}
+```
+
+All actions where a `performBatch` method is defined will automatically include an `enable_batching` input field for users. This field is a boolean switch that allows users to toggle batching functionality. Builders can override the automatically included field by explicitly defining a field named `enable_batching` with type boolean in the `fields` section of the `ActionDefinition`. This may be useful if the builder wants to specify custom labels or descriptions or set a default value.
+
+```js
+const action: ActionDefinition<Settings, Payload> = {
+  title: 'Account',
+  description: 'Represents an individual account, which is an organization or person involved with your business.',
+  defaultSubscription: 'type = "group"',
+  fields: {
+    enable_batching: {
+      type: 'boolean',
+      label: 'Use Salesforce Bulk API',
+      description:
+        'When enabled, the action will use the Salesforce Bulk API to perform the operation. Not compatible with the insert operation.',
+      required: true,
+      default: false
+    }
+  },
+  performBatch: async (request, { settings, payload }) => { ... }
 }
 ```
 
@@ -372,7 +818,255 @@ Keep in mind a few important things about how batching works:
 - Batches may have to up 1,000 events, currently. This, too, is subject to change.
 - Batch sizes are not guaranteed. Due to the way that batches are accumulated internally, you may see smaller batch sizes than you expect when sending low rates of events.
 
-Additionally, you’ll need to coordinate with Segment’s R&D team for the time being. Please reach out to us in your dedicated Slack channel!
+### Advanced batching configurations
+
+The following are some advanced batching configurations for Cloud Mode destinations. Please consult with Segment before using any of these features as this could have significant impact on your destination's performance.
+
+### Batch Keys
+
+By default, Segment groups events using destination instance, settings, action instance, and action mapping settings. For `AudienceDestinationDefinition` implementations, `computation_key` (audience key), audience config settings, and `externalAudienceId` (unique external audience identifier) are also used for batch grouping.
+
+In case you have special requirement to group events into batches based on mapping resolved value of certain field configurations, you can declare those using `batch_keys` field in your action configuration. It is important that the fields chosen for grouping are of low cardinality to avoid forming small batches.
+
+```js
+const action: ActionDefinition<Settings, Payload> = {
+  title: 'Account',
+  description: 'Represents an individual account, which is an organization or person involved with your business.',
+  defaultSubscription: 'type = "group"',
+  fields: {
+    list_id: {...},
+    enable_batching: {...}
+    batch_keys: {
+      label: 'Batch Keys',
+      description: 'The keys to use for batching the events.',
+      type: 'string',
+      unsafe_hidden: true, // this should always be hidden and shouldn't be exposed to customers.
+      required: false,
+      multiple: true,
+      default: ['list_id']
+    },
+  },
+  performBatch: async (request, { settings, payload }) => { ... }
+}
+```
+
+### Batch Size
+
+In case you need to control the maximum number of events that can be batched together for a specific action, you can declare the `batch_size` field in your action configuration. This field allows you to define the upper limit for the number of events in a single batch. It is important to use judgement when deciding to expose this field to customers, as it can impact delivery performance. When exposed, ensure that min and max limits of batch size values is enforced for validation. If a `batch_size` is not specified, the default batch size of 1000 will be used. Please note this default value is subject to change.
+
+```js
+const action: ActionDefinition<Settings, Payload> = {
+  title: 'Account',
+  description: 'Represents an individual account, which is an organization or person involved with your business.',
+  defaultSubscription: 'type = "group"',
+  fields: {
+    list_id: {...},
+    enable_batching: {...}
+    batch_size: {
+      label: 'Batch Size',
+      description: 'The maximum number of events to include in a single batch.',
+      type: 'number',
+      unsafe_hidden: true, // consider if this should be exposed to customers.
+      default: 10000,
+      required: false
+    }
+  },
+  performBatch: async (request, { settings, payload }) => { ... }
+}
+```
+
+### Batch Bytes
+
+In addition to `batch_size`, you can also control the maximum size of a batch in terms of bytes using the `batch_bytes` field in your action configuration. This field allows you to set an upper limit on the total byte size of the batch payload that can be received in your `performBatch` function. This can be useful when the destination API has limitations on request payload size. Exercise caution when using this field and avoid exposing it to customers as it can affect delivery performance. If not specified, a default byte limit of 4MB will be considered. Please note this default value is subject to change.
+
+```js
+const action: ActionDefinition<Settings, Payload> = {
+  title: 'Account',
+  description: 'Represents an individual account, which is an organization or person involved with your business.',
+  defaultSubscription: 'type = "group"',
+  fields: {
+    list_id: {...},
+    enable_batching: {...},
+    batch_size: {
+      label: 'Batch Size',
+      description: 'The maximum number of events to include in a single batch.',
+      type: 'number',
+      unsafe_hidden: true,
+      required: false
+    },
+    batch_bytes: {
+      label: 'Batch Bytes',
+      description: 'The maximum size of a batch in bytes.',
+      type: 'number',
+      unsafe_hidden: true, // consider if this should be exposed to customers. Please avoid by default.
+      required: false,
+      default: 2000000 // 2 MB
+    }
+  },
+  performBatch: async (request, { settings, payload }) => { ... }
+}
+```
+
+## Parsing MultiStatus Responses
+
+When a batch request to a destination returns a 207 MultiStatus response, the `performBatch` method will typically receive an array of responses, indicating the status of each event in the batch. The Actions Framework provides a `MultiStatusResponse` class to help you parse these responses to report a more granular success or failure status for each event.
+
+A detailed example of how to use the `MultiStatusResponse` class can be found in the [MultiStatus Documentation](./docs/multistatus.md).
+
+## Action Hooks
+
+Hooks allow builders to perform requests against a destination at certain points in the lifecycle of a mapping. Values can then be persisted from that request to be used later on in the action's `perform` method.
+
+At the moment two hooks are available: `onMappingSave` and `retlOnMappingSave`:
+
+- `onMappingSave`: This hook appears in the MappingEditor page as a separate step. Users fill in the defined input fields and the code in the `performHook` block is triggered when the user saves their mapping.
+- `retlOnMappingSave`: This hook appears only for destinations connected to a RETL warehouse source. It is otherwise the same as the `onMappingSave` hook.
+
+**Inputs**
+
+Builders may define a set of `inputFields` that are used when performing the request to the destination.
+
+**`performHook`**
+
+Similar to the `perform` method, the `performHook` method allows builders to trigger a request to the destination whenever the criteria for that hook to be triggered is met. This method uses the `inputFields` defined as request parameters.
+
+**Outputs**
+
+Builders define the shape of the hook output with the `outputTypes` property. Successful returns from `performHook` should match the keys defined here. These values are then saved on a per-mapping basis, and can be used in the `perform` or `performBatch` methods when events are sent through the mapping. Outputs can be referenced in the `perform` block with `data.hookOutputs?.<hookType>?.<property>`
+
+### Example (LinkedIn Conversions API)
+
+This example has been shorted for brevity. The full code can be seen in the LinkedIn Conversions API 'streamConversion' action.
+
+```js
+const action: ActionDefinition<Settings, Payload, undefined, HookBundle> = {
+  title: 'Stream Conversion Event',
+  ...
+  hooks: {
+        'onMappingSave': {
+      type: 'onMappingSave',
+      label: 'Create a Conversion Rule',
+      description:
+        'When saving this mapping, we will create a conversion rule in LinkedIn using the fields you provided.',
+      inputFields: {
+        name: {
+          type: 'string',
+          label: 'Name',
+          description: 'The name of the conversion rule.',
+          required: true
+        },
+        conversionType: {
+          type: 'string',
+          label: 'Conversion Type',
+          description: 'The type of conversion rule.',
+          required: true
+        },
+      },
+      outputTypes: {
+        id: {
+          type: 'string',
+          label: 'ID',
+          description: 'The ID of the conversion rule.',
+          required: true
+        },
+        name: {
+          type: 'string',
+          label: 'Name',
+          description: 'The name of the conversion rule.',
+          required: true
+        },
+      },
+      performHook: async (request, { hookInputs }) => {
+        const { data } =
+          await request<ConversionRuleCreationResponse>
+          ('https://api.linkedin.com/rest/conversions', {
+          method: 'post',
+          json: {
+            name: hookInputs.name,
+            type: hookInputs.conversionType
+          }
+        })
+
+        return {
+          successMessage:
+          `Conversion rule ${data.id} created successfully!`,
+          savedData: {
+            id: data.id,
+            name: data.name,
+          }
+        }
+      }
+    }
+  },
+    perform: (request, data) => {
+    return request('https://example.com', {
+      method: 'post',
+      json: {
+        conversion: data.hookOutputs?.onMappingSave?.id,
+        name: data.hookOutputs?.onMappingSave?.name
+      }
+    })
+  }
+  }
+```
+
+## Audience Support (Pilot)
+
+In order to support audience destinations, we've introduced a type that extends regular destinations:
+
+```js
+const destination: AudienceDestinationDefinition<Settings, AudienceSettings> = {
+  // ...other properties
+  audienceFields: {
+    audienceId: {
+      label: 'An audience id required by the destination',
+      description: 'An audience id required by the destination',
+      type: 'string',
+      required: true
+    }
+  },
+  audienceConfig: {
+    mode: {
+      type: 'synced', // Indicates that the audience is synced on some schedule
+      full_audience_sync: true // If true, we send the entire audience. If false, we just send the delta.
+    }
+  },
+  // These are optional and only needed if you need to create an audience before sending events/users.
+  // Create an audience on the destination side
+  async createAudience(request, { settings, audienceSettings, audienceName }) {
+    const response = await request(YOUR_URL, {
+      method: 'POST',
+      json: {
+        new_audience_name: audienceName,
+        some_audience_specific_id: audienceSettings.audienceId // As defined in audienceFields
+      }
+    })
+    const jsonOutput = await response.json()
+    // Segment will save this externalId for subsequent calls
+    return {
+      externalId: jsonOutput['my_audience_id']
+    }
+  },
+  // Right now, this serves mostly as a check to ensure the audience still exists in the destination
+  async getAudience(request, { settings, audienceSettings, externalId }) {
+    const response = await request(YOUR_URL, {
+      method: 'POST',
+      json: {
+        my_audience_id: externalId
+      }
+    })
+    const jsonOutput = await response.json()
+    return {
+      externalId: jsonOutput['my_audience_id']
+    }
+  }
+}
+```
+
+**Other considerations for audience support:**
+
+- It is highly recommended to implement a `performBatch` function in your actions implementation.
+- You should implement actions specific to audiences such as adding and removing a user
 
 ## HTTP Requests
 
@@ -382,8 +1076,7 @@ You can use the `request` object to make requests and curate responses. This `re
 
 In addition to making manual HTTP requests, you can use the `extendRequest` helper to reduce boilerplate across actions and authentication operations in the definition:
 
-```
-
+```js
 const destination = {
   // ...other properties
   extendRequest: (request, { settings }) => {
@@ -422,8 +1115,7 @@ Both the `request(url, options)` function and the `extendRequest` return value a
 - `timeout`: Time in milliseconds when a request should be aborted. Default is `10000`.
 - `username`: Basic authentication username field. Will automatically get base64 encoded with the password and added to the request headers: `Authorization: Basic <username:password>`
 
-```
-
+```js
 const response = await request('https://example.com', {
   method: 'post',
   headers: { 'content-type': 'application/json' },
@@ -445,11 +1137,59 @@ There are a few subtle differences from the Fetch API which are meant to limit t
 - some options and behaviors are not applicable to Node.js and will be ignored by `node-fetch`. See this list of [known differences](https://github.com/node-fetch/node-fetch/blob/1780f5ae89107ded4f232f43219ab0e548b0647c/docs/v2-LIMITS.md).
 - `method` will automatically get upcased for consistency.
 
+## Automatic Hashing Detection with `processHashing`
+
+Our popular segment Adtect destinations support [automatic hash detection](https://segment.com/docs/connections/destinations/#hashing) of personally identifyable information (PII). If your destination hashes PII data, we recommend you use the `processHashing` utility instead of `createHash` from `crypto` module.
+This utility automatically detects if a value is already hashed. It will only apply a hash if the value appears to be unhashed.
+
+The `processHashing` utility supports `md5`, `sha1`,`sha224`,`sha256`,`sha384` and`sha512` hashing algorithms. It can output digests in `hex` or `base64` format.
+
+**Note**: For empty or whitespace-only strings, the `processHashing` outputs an empty string instead of throwing an error like `createHash` hash module.
+
+### Example 1: Hashing an Email Address
+
+```
+  import { processHashing } from 'destination-actions/lib/hashing-utils'
+
+  const email = ' Person@email.com '
+  const hashedEmail = processHashing(
+    email,
+    'sha256',
+    'hex',
+    (value) => value.trim().toLowerCase()
+  )
+
+  console.log(hashedEmail) // hashed string
+```
+
+### Example 2: Hashing a Phone Number
+
+```
+  const phone = '+1(706)-767-5127'
+  const normalizePhone = (value: string) => value.replace(/[^0-9]/g, '')
+
+  const hashedPhone = processHashing(
+    phone,
+    'sha256',
+    'hex',
+    normalizePhone
+  )
+
+  console.log(hashedPhone) // hashed string
+```
+
+**Requesting Additional Algorithms**
+To request additional hash algorithms, contact partner-support@segment.com.
+
+## Support
+
+For any issues, please contact our support team at partner-support@segment.com.
+
 ## License
 
 MIT License
 
-Copyright (c) 2022 Segment
+Copyright (c) 2025 Segment
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

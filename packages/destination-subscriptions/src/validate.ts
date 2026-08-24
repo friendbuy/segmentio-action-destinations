@@ -72,17 +72,21 @@ const validateCondition = (condition: Condition, data: any): boolean => {
 const validateValue = (actual: unknown, operator: Operator, expected?: string | boolean | number): boolean => {
   switch (operator) {
     case '=':
-      return String(actual) === String(expected)
+      return actual === String(expected)
+    case 'number_equals':
+      return typeof actual === 'number' && Number(actual) === Number(expected)
     case '!=':
-      return String(actual) !== String(expected)
+      return actual !== String(expected)
+    case 'number_not_equals':
+      return typeof actual === 'number' && Number(actual) !== Number(expected)
     case '<':
-      return Number(actual) < Number(expected)
+      return typeof actual === 'number' && Number(actual) < Number(expected)
     case '<=':
-      return Number(actual) <= Number(expected)
+      return typeof actual === 'number' && Number(actual) <= Number(expected)
     case '>':
-      return Number(actual) > Number(expected)
+      return typeof actual === 'number' && Number(actual) > Number(expected)
     case '>=':
-      return Number(actual) >= Number(expected)
+      return typeof actual === 'number' && Number(actual) >= Number(expected)
     case 'contains':
       return typeof actual === 'string' && actual.includes(String(expected))
     case 'not_contains':
@@ -99,6 +103,10 @@ const validateValue = (actual: unknown, operator: Operator, expected?: string | 
       return actual !== undefined && actual !== null
     case 'not_exists':
       return actual === undefined || actual === null
+    case 'is_true':
+      return typeof actual === 'boolean' && actual === true
+    case 'is_false':
+      return typeof actual === 'boolean' && actual === false
     default:
       return false
   }

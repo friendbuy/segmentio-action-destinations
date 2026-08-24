@@ -1,21 +1,27 @@
 import type { ActionDefinition } from '@segment/actions-core'
 import type { Settings } from '../generated-types'
-import { convertAttributeTimestamps, convertValidTimestamp, trackApiEndpoint } from '../utils'
+import { sendBatch, sendSingle } from '../utils'
 import type { Payload } from './generated-types'
-
-interface TrackEventPayload {
-  name: string
-  type?: string
-  timestamp?: string | number
-  data?: Record<string, unknown>
-  // Required for anonymous events
-  anonymous_id?: string
-}
+import { eventProperties } from '../customerio-properties'
 
 const action: ActionDefinition<Settings, Payload> = {
   title: 'Track Event',
   description: 'Track an event for a known or anonymous person.',
-  defaultSubscription: 'type = "track"',
+  defaultSubscription: `
+    type = "track"
+    and event != "Application Installed"
+    and event != "Application Opened"
+    and event != "Application Uninstalled"
+    and event != "Device Created or Updated"
+    and event != "Device Deleted"
+    and event != "Relationship Deleted"
+    and event != "User Deleted"
+    and event != "User Suppressed"
+    and event != "User Unsuppressed"
+    and event != "Object Deleted"
+    and event != "Report Delivery Event"
+    and event != "Report Content Event"
+  `,
   fields: {
     id: {
       label: 'Person ID',
@@ -44,6 +50,15 @@ const action: ActionDefinition<Settings, Payload> = {
         '@path': '$.event'
       }
     },
+    event_id: {
+      label: 'Event ID',
+      description:
+        'An optional identifier used to deduplicate events. [Learn more](https://customer.io/docs/api/#operation/track).',
+      type: 'string',
+      default: {
+        '@path': '$.messageId'
+      }
+    },
     timestamp: {
       label: 'Timestamp',
       description: 'A timestamp of when the event took place. Default is current date and time.',
@@ -65,42 +80,30 @@ const action: ActionDefinition<Settings, Payload> = {
       description: 'Convert dates to Unix timestamps (seconds since Epoch).',
       type: 'boolean',
       default: true
-    }
+    },
+    ...eventProperties
   },
 
-  perform: (request, { settings, payload }) => {
-    let timestamp: string | number | undefined = payload.timestamp
-    let data = payload.data
+  performBatch: (request, { payload: payloads, settings }) => {
+    return sendBatch(
+      request,
+      payloads.map((payload) => ({ action: 'event', payload: mapPayload(payload), settings, type: 'person' }))
+    )
+  },
 
-    if (payload.convert_timestamp !== false) {
-      if (timestamp) {
-        timestamp = convertValidTimestamp(timestamp)
-      }
+  perform: (request, { payload, settings }) => {
+    return sendSingle(request, { action: 'event', payload: mapPayload(payload), settings, type: 'person' })
+  }
+}
 
-      if (data) {
-        data = convertAttributeTimestamps(data)
-      }
-    }
+function mapPayload(payload: Payload) {
+  const { id, event_id, data, ...rest } = payload
 
-    const body: TrackEventPayload = {
-      name: payload.name,
-      data,
-      timestamp
-    }
-
-    let url: string
-
-    if (payload.id) {
-      url = `${trackApiEndpoint(settings.accountRegion)}/api/v1/customers/${payload.id}/events`
-    } else {
-      url = `${trackApiEndpoint(settings.accountRegion)}/api/v1/events`
-      body.anonymous_id = payload.anonymous_id
-    }
-
-    return request(url, {
-      method: 'post',
-      json: body
-    })
+  return {
+    ...rest,
+    person_id: id,
+    id: event_id,
+    attributes: data
   }
 }
 

@@ -2,19 +2,21 @@
 
 export interface Payload {
   /**
-   * Property key by which Cordial contact should be identified. May be any primary or secondary key (e.g. cID, email, segment_id etc.)
+   * Segment User ID value
    */
-  identifyByKey: string
+  segmentId?: string
   /**
-   * Value for defined key
+   * Segment Anonymous ID value
    */
-  identifyByValue: string
+  anonymousId?: string
   /**
-   * Segment Group ID
+   * An ordered list of contact identifiers in Cordial. Each item in the list represents an identifier. For example, `channels.email.address -> userId` and/or `customerId -> traits.customerId`. If a contact is found using the identifiers it is updated, otherwise a new contact is created.
+   */
+  userIdentities?: {
+    [k: string]: unknown
+  }
+  /**
+   * Segment group id. Required.
    */
   groupId: string
-  /**
-   * Cordial List Name
-   */
-  listName?: string
 }
